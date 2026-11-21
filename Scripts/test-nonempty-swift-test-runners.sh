@@ -3017,6 +3017,26 @@ boundary_names = (
     "Declare native capture boundary (candidate graph)",
 )
 normalized_workflow = current_workflow
+github_hosted_xcode = (
+    "      - &github-hosted-xcode\n"
+    "        name: Select qualified Xcode on GitHub-hosted macOS\n"
+    "        if: runner.environment == 'github-hosted'\n"
+    "        run: |\n"
+    "          set -euo pipefail\n"
+    "          developer_dir=/Applications/Xcode_26.4.1.app/Contents/Developer\n"
+    '          test "$(DEVELOPER_DIR="$developer_dir" xcodebuild -version)" = '
+    "$'Xcode 26.4.1\\nBuild version 17E202'\n"
+    '          printf \'DEVELOPER_DIR=%s\\n\' "$developer_dir" >> "$GITHUB_ENV"\n'
+)
+for job_id in ("macos-build", "macos-validation", "macos-enhanced"):
+    start, end, block = job_block(normalized_workflow, job_id)
+    xcode_step = github_hosted_xcode if job_id == "macos-build" else "      - *github-hosted-xcode\n"
+    if block.count(xcode_step + "      - name: Toolchain\n") != 1:
+        raise SystemExit(f"CI {job_id} must select the same Xcode before running native checks")
+    normalized_workflow = (
+        normalized_workflow[:start] + block.replace(xcode_step, "", 1)
+        + normalized_workflow[end:]
+    )
 preflight_environment = re.search(
     r"^env:\n  FLECK_EDITOR_PREFLIGHT_SELECTOR: '([^']+)'\n\n",
     current_workflow, re.M,

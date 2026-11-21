@@ -135,6 +135,14 @@ jobs:
             printf 'tree=%s\n' "$(git rev-parse HEAD^{tree})"
             printf 'version=%s\n' "$(cat VERSION)"
           } | tee -a "$GITHUB_OUTPUT"
+      - &github-hosted-xcode
+        name: Select qualified Xcode on GitHub-hosted macOS
+        if: runner.environment == 'github-hosted'
+        run: |
+          set -euo pipefail
+          developer_dir=/Applications/Xcode_26.4.1.app/Contents/Developer
+          test "$(DEVELOPER_DIR="$developer_dir" xcodebuild -version)" = $'Xcode 26.4.1\nBuild version 17E202'
+          printf 'DEVELOPER_DIR=%s\n' "$developer_dir" >> "$GITHUB_ENV"
       - name: Toolchain
         run: |
           sw_vers
@@ -260,6 +268,7 @@ jobs:
             printf 'tree=%s\n' "$(git rev-parse HEAD^{tree})"
             printf 'version=%s\n' "$(cat VERSION)"
           } | tee -a "$GITHUB_OUTPUT"
+      - *github-hosted-xcode
       - name: Toolchain
         run: |
           xcodebuild -version
@@ -427,6 +436,7 @@ jobs:
           pmset -g | grep -E '^ (displaysleep|sleep) '
       - name: Check out repository (actions/checkout v6.0.2)
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - *github-hosted-xcode
       - name: Toolchain
         run: |
           xcodebuild -version
