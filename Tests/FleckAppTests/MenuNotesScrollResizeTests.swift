@@ -18,10 +18,19 @@ import Testing
 // folder chips. The container test measures both overflow crossings from the
 // app itself and derives its widths from them, so the tab-only state is proved
 // rather than assumed. The stored panel narrows to 480 (both strips must
-// overflow) and widens to 1040 (both must fit) before a real release.
+// overflow) and widens within its display budget (both must fit) before release.
 
 private let menuScrollTabRail: CGFloat = 56
 private let menuScrollFolderRail: CGFloat = 56
+
+private let menuScrollHostedGeometry = ConditionTrait.enabled(
+  "Hosted Notes resize requires at least 800 × 440 visible points"
+) {
+  await MainActor.run {
+    guard let visible = NSScreen.main?.visibleFrame else { return false }
+    return visible.width >= 800 && visible.height >= 440
+  }
+}
 
 @MainActor
 private func menuScrollWideNotes(count: Int) -> [Note] {
@@ -662,12 +671,12 @@ func hostedStripsCrossOverflowOneAtATimeAndSurviveASafeAreaChange() async throws
   await fixture.state.quiescePersistenceForTesting()
 }
 
-@Test @MainActor
-func hostedMenuResizeReleaseAcrossBothThresholdsKeepsScrollGeometry() async throws {
+@Test(menuScrollHostedGeometry, arguments: [800, 1_150]) @MainActor
+func hostedMenuResizeReleaseAcrossBothThresholdsKeepsScrollGeometry(widthBudget: Int) async throws {
   let screen = try #require(NSScreen.main)
   let visible = screen.visibleFrame
-  try #require(visible.width >= 1_150 && visible.height >= 500)
   let buttonFrame = CGRect(x: visible.maxX - 64, y: visible.maxY + 2, width: 34, height: 22)
+  let wideWidth = min(1_040, min(visible.width, CGFloat(widthBudget)) - 64)
   let fixture = try await MenuNotesScrollFixture(
     width: 720,
     height: 415,
@@ -747,8 +756,8 @@ func hostedMenuResizeReleaseAcrossBothThresholdsKeepsScrollGeometry() async thro
     folderOverflow: true
   )
 
-  try await drag(to: 1_040)
-  try menuScrollRequireStripStates(fixture, tabOverflow: false, folderOverflow: false, at: 1_040)
+  try await drag(to: wideWidth)
+  try menuScrollRequireStripStates(fixture, tabOverflow: false, folderOverflow: false, at: wideWidth)
   try menuScrollAssertStrips(
     fixture,
     tab: tab,
@@ -769,7 +778,7 @@ func hostedMenuResizeReleaseAcrossBothThresholdsKeepsScrollGeometry() async thro
   try await Task.sleep(for: .milliseconds(300))
   await fixture.settle()
 
-  try menuScrollRequireStripStates(fixture, tabOverflow: false, folderOverflow: false, at: 1_040)
+  try menuScrollRequireStripStates(fixture, tabOverflow: false, folderOverflow: false, at: wideWidth)
   let sameTabScroll = fixture.tabScrollView === tab
   let sameTabDocument = tab.documentView === tabDocument
   let folderScroll = try? fixture.folderScrollView()
@@ -790,18 +799,26 @@ func hostedMenuResizeReleaseAcrossBothThresholdsKeepsScrollGeometry() async thro
 }
 
 @MainActor
-@Test
-func hostedMenuResizeRepeatedReversalsAndCrossingsPreserveScrollGeometry() async throws {
+@Test(menuScrollHostedGeometry, arguments: [800, 1_150])
+func hostedMenuResizeRepeatedReversalsAndCrossingsPreserveScrollGeometry(widthBudget: Int)
+  async throws
+{
   let screen = try #require(NSScreen.main)
   let visible = screen.visibleFrame
-  try #require(visible.width >= 1_150 && visible.height >= 500)
   let button = CGRect(x: visible.midX - 17, y: visible.maxY + 2, width: 34, height: 22)
+  let budget = min(visible.width, CGFloat(widthBudget))
+  let widest = min(540, (budget / 2 + button.width / 2 - 8).rounded(.down))
+  let floor: CGFloat = 380
+  let room = widest - floor
+  let narrow = floor + (room * 0.3125).rounded(.down)
+  let initial = floor + (room * 0.8125).rounded(.down)
+  let alternate = floor + (room * 0.5625).rounded(.down)
   let fixture = try await MenuNotesScrollFixture(
-    width: 510,
+    width: initial,
     height: 415,
     sizing: .storedPreferences,
     statusButtonFrame: button,
-    panelWidth: 510,
+    panelWidth: initial,
     panelHeight: 415
   )
   defer { fixture.close() }
@@ -845,7 +862,7 @@ func hostedMenuResizeRepeatedReversalsAndCrossingsPreserveScrollGeometry() async
     #expect(fixture.editorString == body)
   }
 
-  var expectedWidth: CGFloat = 510
+  var expectedWidth = initial
   for cycle in 0..<8 {
     let startsOnRight = cycle.isMultiple(of: 2)
     let startSide: MenuPanelFixedSide = startsOnRight ? .right : .left
@@ -878,13 +895,13 @@ func hostedMenuResizeRepeatedReversalsAndCrossingsPreserveScrollGeometry() async
     let startEdge = startsOnRight ? button.maxX : button.minX
     let releaseEdge = startsOnRight ? button.minX : button.maxX
     let direction: CGFloat = startsOnRight ? 1 : -1
-    try await drag(to: startEdge - direction * 429, side: startSide, width: 430)
-    try await drag(to: startEdge - direction * 539, side: startSide, width: 540)
-    try await drag(to: button.midX + direction * 6, side: otherSide, width: 380)
-    try await drag(to: button.midX - direction * 6, side: startSide, width: 380)
-    try await drag(to: button.midX + direction * 6, side: otherSide, width: 380)
+    try await drag(to: startEdge - direction * (narrow - 1), side: startSide, width: narrow)
+    try await drag(to: startEdge - direction * (widest - 1), side: startSide, width: widest)
+    try await drag(to: button.midX + direction * 6, side: otherSide, width: floor)
+    try await drag(to: button.midX - direction * 6, side: startSide, width: floor)
+    try await drag(to: button.midX + direction * 6, side: otherSide, width: floor)
 
-    expectedWidth = cycle.isMultiple(of: 2) ? 470 : 510
+    expectedWidth = cycle.isMultiple(of: 2) ? alternate : initial
     let releaseX = releaseEdge + direction * (expectedWidth - 1)
     try await drag(to: releaseX, side: otherSide, width: expectedWidth)
     let releasedFrame = fixture.window.frame
