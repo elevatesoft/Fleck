@@ -12,7 +12,6 @@
   <a href="Package.swift"><img alt="Swift 6" src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&amp;logoColor=white"></a>
   <a href="https://github.com/elevatesoft/Fleck/actions/workflows/ci.yml?query=branch%3Amain"><img alt="CI status for main" src="https://github.com/elevatesoft/Fleck/actions/workflows/ci.yml/badge.svg?branch=main"></a>
   <a href="LICENSE"><img alt="License: MPL-2.0" src="https://img.shields.io/badge/license-MPL--2.0-6355a6"></a>
-  <a href="docs/RELEASES.md"><img alt="Status: public Developer Preview" src="https://img.shields.io/badge/status-public%20developer%20preview-16a34a"></a>
 </p>
 
 <p align="center">
@@ -24,10 +23,14 @@
   <a href="#contributing">Contributing</a>
 </p>
 
-Fleck is a place to catch a thought without leaving what you're doing. Open it
-from the menu bar and type or dictate a note. Come back to format it in the
-native editor, file it in a folder, or link it to another note. Fleck keeps
-readable Markdown and rich-text formatting on your Mac, without a Fleck
+Fleck turns speech into notes on your Mac. Apple Speech transcribes on-device;
+then, where available, a separate Apple Intelligence language model can tidy
+the text on-device through Foundation Models. Speech transcription doesn't
+require Apple Intelligence.
+
+Open Fleck from the menu bar to dictate or type a note. Come back to format it
+in the native editor, file it in a folder, or link it to another note. Fleck
+keeps readable Markdown and rich-text formatting on your Mac, without a Fleck
 account or cloud sync.
 
 You can give an AI tool access to just the notes you choose. The optional
@@ -39,47 +42,32 @@ edit access, see what it changed, and undo eligible edits.
 *The Project notes tab is open in the native editor. The toolbar puts dictation
 and formatting above the note, and the Reference.txt shortcut keeps a related
 file within reach without importing it. This development screenshot uses sample
-notes; the downloadable preview may look different.*
+notes; a published app may look different.*
 
 ## Download and launch Fleck
 
-The published app is [Fleck 1.1.2-beta.2 (Build 84)](https://github.com/elevatesoft/Fleck/releases/tag/v1.1.2-beta.2),
-an early **Developer Preview** for **Apple silicon**. macOS 14 is the declared
-minimum, but a full macOS 14 native pass and Intel compatibility haven't been
-verified. The preview isn't notarized, and behavior and storage formats may
-change.
+Open [GitHub Releases](https://github.com/elevatesoft/Fleck/releases) and choose
+a release with a prebuilt app for your Mac. Its release notes list the features
+included, system requirements, signing information, and checksum.
 
 ### Installing the app release
 
-1. In the release's **Assets**, download `Fleck.1.1.2-beta.2.Build.84.app.zip`,
-   not a **Source code** archive. In Terminal, from the folder containing the
-   ZIP, run `shasum -a 256 Fleck.1.1.2-beta.2.Build.84.app.zip` and compare
-   the result with the SHA-256 shown on the release page.
-2. Extract the ZIP and drag `Fleck 1.1.2-beta.2 Build 84.app` into **Applications**.
-   Try opening it there. If macOS warns about the lack of notarization, see
+1. In the release's **Assets**, download the app ZIP, not a **Source code**
+   archive. Compare the ZIP's SHA-256 with the checksum in the release notes.
+2. Extract the ZIP, drag the app into **Applications**, and open it from there.
+   If macOS shows a security warning, check the release's signing notes and
    [Apple's guidance](https://support.apple.com/en-us/102445) before deciding
    whether to open it. Don't disable Gatekeeper.
 3. Click Fleck's four-tile icon in the **menu bar** (there's no Dock icon).
    Create a note, give it a title, and start typing. It saves automatically.
    To try Apple's on-device dictation, click the toolbar microphone and grant
-   microphone permission when prompted.
+   the requested macOS permissions.
 
-The prebuilt app doesn't need Xcode. The preview includes native formatting,
-tabs and folders, workspace search, `[[note links]]` with backlinks, inline
-images from Finder, and optional Agent Connector setup. It doesn't package
-in-app onboarding; the [release notes and first-launch guide](docs/release-notes/1.1.2-beta.2.md)
-cover the editor, keyboard shortcuts, dictation, and agent setup.
-
-Public `main` has changes that aren't in Build 84, such as inline image resizing
-and rotation, copying mixed text and images as rich content, and line diffs in
-Agent Activity. The sections below describe **current public source**, not
-the contents of that download. [`VERSION`](VERSION) identifies the source
-version, the [changelog](CHANGELOG.md) records source changes, and
-[GitHub Releases](https://github.com/elevatesoft/Fleck/releases) lists available
-app packages. Local development builds and CI artifacts aren't public releases.
-The [1.8.0-beta.1 development notes](docs/release-notes/1.8.0-beta.1.md) record
-earlier source-preview changes, including native selection drags and editor
-fixes; they don't describe a downloadable app.
+The prebuilt app doesn't need Xcode. The sections below describe **current
+public source**, which can be ahead of a published app. Check the release notes
+for what's in your download. [`VERSION`](VERSION) and the
+[changelog](CHANGELOG.md) describe the source tree; development builds and CI
+artifacts aren't public releases.
 
 ## What is here
 
@@ -87,11 +75,11 @@ The ordinary build from public `main` contains:
 
 | Area | Current implementation |
 | --- | --- |
+| On-device dictation | Apple Speech transcription, optional Foundation Models cleanup, and Inbox-safe Smart Capture routing. |
 | Native workspace | Menu-bar workspace and an independently sized pinned window. |
 | Notes and organization | Local notes, tabs, folders, search, backlinks, 30-day Trash, recovery, text/Markdown import, and plain-text/Markdown/RTF export. |
 | File shortcuts | A native single-file chooser adds local file references; compact rows can open, reveal, relink, or remove them. Shortcuts stay on this Mac and are not included in note exports. |
 | Native editor | An AppKit `NSTextView` editor with native undo, formatting, lists, checklists, and inline display of image files pasted or dropped from Finder. |
-| On-device dictation | Apple on-device speech recognition, optional faithful local cleanup, and Inbox-safe Smart Capture routing. |
 | Agent Connector | A separately packaged local helper with profile-scoped capabilities, explicit note or folder grants, visible activity, revision checks, and Undo. |
 | Local persistence | Readable local storage with atomic replacement and a previous-generation recovery snapshot. |
 
@@ -237,13 +225,25 @@ are stored in Keychain, not in note files or preferences. See the
 
 ### Dictation pipeline
 
+Standard dictation uses **Apple Speech** for transcription and keeps audio
+on-device. On macOS 26 or later it uses `SpeechAnalyzer` with
+`DictationTranscriber` and requires ready system speech assets for the locale.
+Earlier supported macOS versions use `SFSpeechRecognizer` in on-device mode.
+Neither path sends audio to a cloud recognizer when local speech is unavailable.
+
+After personal-dictionary resolution, Fleck can use **Apple Intelligence's
+on-device language model** through Foundation Models for cleanup and Smart
+Capture routing. This is a separate text step, not speech recognition. It
+requires macOS 26 or later, an eligible Mac with Apple Intelligence enabled,
+and a ready system model.
+
 ```mermaid
 flowchart TB
   Trigger["Global capture shortcut<br/>or editor microphone"] --> Speech["Apple on-device speech recognition<br/>no cloud fallback"]
   Speech --> Dictionary["Personal-dictionary resolution"]
-  Dictionary --> Cleanup{"Optional bounded cleanup"}
-  Cleanup -- "checked against captured text" --> Clean["Cleaned text"]
-  Cleanup -- "unavailable or rejected" --> Raw["Keep the safer original text"]
+  Dictionary --> Cleanup{"Optional Foundation Models cleanup"}
+  Cleanup -- "passes transcript checks" --> Clean["Cleaned text"]
+  Cleanup -- "unavailable or rejected" --> Raw["Deterministic local cleanup or unaltered text"]
   Clean --> Route{"Where does it go?"}
   Raw --> Route
   Route -- "focused editor" --> Insert["Insert at the cursor"]
@@ -254,11 +254,10 @@ flowchart TB
   Inbox --> Save
 ```
 
-- Standard speech requires Apple's on-device recognition and **has no cloud fallback**.
-- On macOS 26 or later, the ordinary build can use Apple's on-device Foundation
-  Models for cleanup and routing if the system reports them available. Cleanup is
-  checked against the captured text; if it isn't available or fails that check,
-  Fleck keeps the original text.
+- Model output is checked against the transcript. If cleanup is unavailable or
+  rejected, Fleck can apply limited non-model cleanup where safe, or keep the
+  dictionary-resolved text. If Smart Capture can't resolve a destination, it
+  saves to the Inbox.
 - Audio buffers are transient. Dictation history stores text and outcome metadata, **not recorded audio**.
 - The [dictation boundary](ARCHITECTURE.md#dictation-boundary) describes the capture modes and fallbacks. Use synthetic content and sanitize evidence for [native dictation testing](TESTING.md#dictation).
 
@@ -316,7 +315,7 @@ Safety properties built into the protocol:
 > your macOS user or control whether a connected AI client uses an online service.
 
 Public `main` also contains opt-in note and task event subscriptions, separate
-from the local request path and not in Build 84. Observation is off by default.
+from the local request path. Observation is off by default.
 Outbound delivery requires an approved profile and scope, owner consent, and
 a verified HTTPS endpoint. Fleck signs and records those deliveries. See the
 [agent workspace boundary](ARCHITECTURE.md#agent-workspace-boundary) for local
@@ -324,7 +323,15 @@ authorization and the [changelog](CHANGELOG.md) for the event implementation.
 
 ### Optional Enhanced Local graph
 
-The experimental Enhanced Local paths (candidate Parakeet speech and Gemma cleanup/routing, model manifests, installation state, and resource residency) are isolated at compile time so they cannot silently enter an ordinary release.
+The experimental Enhanced Local graph includes **NVIDIA Parakeet TDT 0.6B v2**
+(Core ML) for local transcription and **Google Gemma 3 1B IT** (MLX, 4-bit QAT)
+for local transcript cleanup and Smart Capture routing. This is an opt-in
+debug path, not the ordinary app. Ordinary packages don't bundle either
+model's weights. The source manifests identify the weights; they don't install
+or activate them. Parakeet requires verified local
+assets and runtime readiness. For cleanup and model-assisted routing, an
+available Apple system model takes precedence; Gemma is an option only when
+the system model is unavailable and the local Gemma runtime is ready.
 
 | | Ordinary build | With `FLECK_ENHANCED_CANDIDATE=1` |
 | --- | --- | --- |
@@ -351,10 +358,8 @@ behavior, or idle resources. See the [project principles](#project-principles).
 
 ## Requirements
 
-These are **source-development requirements**. For the published prebuilt app,
-use the macOS and architecture requirements listed on its release page instead
-(macOS 14 or later; validated on Apple silicon — native Intel and a full macOS 14
-native pass are not yet verified).
+These are **source-development requirements**. For a prebuilt app, use the
+macOS and architecture requirements in its release notes.
 
 | Requirement | Version or scope |
 | --- | --- |
