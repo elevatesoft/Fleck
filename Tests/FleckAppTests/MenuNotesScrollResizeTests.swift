@@ -15,7 +15,7 @@ import Testing
 // accessibility API, no other process windows.
 //
 // Content: 3 titles capped at 160pt (~576pt of tab strip content) and 5 short
-// folder chips. The container test measures both overflow crossings from the
+// folder chips by default. The container test measures both overflow crossings from the
 // app itself and derives its widths from them, so the tab-only state is proved
 // rather than assumed. The stored panel narrows to 480 (both strips must
 // overflow) and widens within its display budget (both must fit) before release.
@@ -229,7 +229,8 @@ private final class MenuNotesScrollFixture {
     sizing: MenuScrollSizing,
     statusButtonFrame: CGRect? = nil,
     panelWidth: CGFloat? = nil,
-    panelHeight: CGFloat? = nil
+    panelHeight: CGFloat? = nil,
+    folderCount: Int = 5
   ) async throws {
     let accessibilityAttribute = NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface")
     previousAccessibilityValue = NSApplication.shared.accessibilityAttributeValue(
@@ -238,7 +239,7 @@ private final class MenuNotesScrollFixture {
     root = FileManager.default.temporaryDirectory
       .appendingPathComponent("menu-notes-scroll-" + UUID().uuidString, isDirectory: true)
     notes = menuScrollWideNotes(count: 3)
-    folders = try menuScrollShortFolders(count: 5)
+    folders = try menuScrollShortFolders(count: folderCount)
     let state = AppState(
       store: LocalStore(rootURL: root),
       saveOperation: { _, _, _, _ in .committed }
@@ -683,7 +684,8 @@ func hostedMenuResizeReleaseAcrossBothThresholdsKeepsScrollGeometry(widthBudget:
     sizing: .storedPreferences,
     statusButtonFrame: buttonFrame,
     panelWidth: 720,
-    panelHeight: 415
+    panelHeight: 415,
+    folderCount: wideWidth < 1_040 ? 4 : 5
   )
   defer { fixture.close() }
 
