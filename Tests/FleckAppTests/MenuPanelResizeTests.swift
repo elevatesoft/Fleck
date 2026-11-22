@@ -4865,6 +4865,57 @@ private final class DisplayRecordingWindow: NSWindow {
   #expect(!controller.isTracking)
 }
 
+@Test @MainActor func menuPanelInstallerFeedbackDoesNotResizeInsideLayoutOrConfiguration()
+  async throws
+{
+  let screen = try #require(NSScreen.main)
+  let visible = screen.visibleFrame
+  let buttonFrame = CGRect(x: visible.maxX - 90, y: visible.maxY + 2, width: 34, height: 22)
+  let statusButton = PublicStatusButtonFixture(screenFrame: buttonFrame)
+  let geometry = MenuPanelGeometryStore(windows: { [statusButton.window] })
+  geometry.rememberCompletedSide(.right)
+  let size = CGSize(width: 520, height: 400)
+  let frame = CGRect(
+    x: buttonFrame.maxX - size.width, y: visible.maxY - size.height,
+    width: size.width, height: size.height)
+  let window = MenuPanelFrameCorrectionWindow(
+    contentRect: frame, styleMask: .borderless, backing: .buffered, defer: false)
+  window.isReleasedWhenClosed = false
+  let root = NSView(frame: CGRect(origin: .zero, size: size))
+  let anchor = MenuPanelResizeInstallationView(controller: MenuPanelResizeController())
+  anchor.frame = root.bounds
+  window.contentView = root
+  root.addSubview(anchor)
+  defer {
+    anchor.dismantle()
+    window.contentView = nil
+    window.orderOut(nil)
+  }
+  anchor.configure(geometryStore: geometry, preferredSize: size, canResize: true, onCommit: { _ in })
+  window.orderFront(nil)
+  await settleResizeHost(root)
+  try #require(anchor.host.isInstalled)
+  try #require(window.frame == frame)
+
+  for callback in ["layout", "configuration"] {
+    let writesBefore = window.frameWrites
+    window.reportedFrame = CGRect(
+      x: frame.minX + 20, y: frame.minY, width: frame.width - 20, height: frame.height)
+    if callback == "layout" {
+      anchor.layout()
+    } else {
+      anchor.configure(
+        geometryStore: geometry, preferredSize: size, canResize: true, onCommit: { _ in })
+    }
+    #expect(window.frameWrites == writesBefore, "Native frame write from \(callback)")
+    await withCheckedContinuation { continuation in
+      DispatchQueue.main.async { continuation.resume() }
+    }
+    #expect(window.frameWrites == writesBefore + 1)
+    #expect(window.frame == frame)
+  }
+}
+
 @MainActor
 private final class MenuPanelFrameCorrectionWindow: NSWindow {
   var reportedFrame: NSRect?

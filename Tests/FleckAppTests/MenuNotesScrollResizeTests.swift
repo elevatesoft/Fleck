@@ -790,6 +790,122 @@ func hostedMenuResizeReleaseAcrossBothThresholdsKeepsScrollGeometry() async thro
 }
 
 @MainActor
+@Test
+func hostedMenuResizeRepeatedReversalsAndCrossingsPreserveScrollGeometry() async throws {
+  let screen = try #require(NSScreen.main)
+  let visible = screen.visibleFrame
+  try #require(visible.width >= 1_150 && visible.height >= 500)
+  let button = CGRect(x: visible.midX - 17, y: visible.maxY + 2, width: 34, height: 22)
+  let fixture = try await MenuNotesScrollFixture(
+    width: 510,
+    height: 415,
+    sizing: .storedPreferences,
+    statusButtonFrame: button,
+    panelWidth: 510,
+    panelHeight: 415
+  )
+  defer { fixture.close() }
+
+  let resizeHost = try #require(fixture.resizeHost())
+  let tab = try #require(fixture.tabScrollView)
+  let folder = try fixture.folderScrollView()
+  let tabDocument = try #require(tab.documentView)
+  let folderDocument = try #require(folder.documentView)
+  let selected = try #require(fixture.state.workspace.selectedNoteID)
+  let body = try #require(fixture.selectedBody)
+  let top = fixture.window.frame.maxY
+  let height = fixture.window.frame.height
+  var eventNumber = 500
+
+  func checkFrame(side: MenuPanelFixedSide, width: CGFloat) throws {
+    let frame = fixture.window.frame
+    try #require(abs(frame.width - width) <= 0.5)
+    #expect(frame.maxY == top)
+    #expect(frame.height == height)
+    #expect(visible.contains(frame))
+    if side == .right {
+      #expect(frame.maxX == button.maxX)
+    } else {
+      #expect(frame.minX == button.minX)
+    }
+  }
+
+  func checkHostedViews() throws {
+    let currentFolder = try fixture.folderScrollView()
+    #expect(fixture.resizeHost() === resizeHost)
+    #expect(fixture.tabScrollView === tab)
+    #expect(currentFolder === folder)
+    #expect(tab.documentView === tabDocument)
+    #expect(folder.documentView === folderDocument)
+    #expect(tab.contentView.bounds.width > 0)
+    #expect(folder.contentView.bounds.width > 0)
+    #expect(tab.contentView.bounds.width <= fixture.window.frame.width)
+    #expect(folder.contentView.bounds.width <= fixture.window.frame.width)
+    #expect(fixture.state.workspace.selectedNoteID == selected)
+    #expect(fixture.editorString == body)
+  }
+
+  var expectedWidth: CGFloat = 510
+  for cycle in 0..<8 {
+    let startsOnRight = cycle.isMultiple(of: 2)
+    let startSide: MenuPanelFixedSide = startsOnRight ? .right : .left
+    let otherSide: MenuPanelFixedSide = startsOnRight ? .left : .right
+    try checkFrame(side: startSide, width: expectedWidth)
+    let bounds = resizeHost.bounds
+    let start = resizeHost.convert(
+      CGPoint(x: startsOnRight ? bounds.minX + 1 : bounds.maxX - 1, y: bounds.midY),
+      to: nil
+    )
+    let admitted = await menuScrollResizeBeginReadiness(resizeHost, at: start, in: fixture.window)
+    try #require(admitted, "Gesture \(cycle + 1) never reached the resize handler")
+    let y = fixture.window.convertPoint(toScreen: start).y
+    let storedWidth = fixture.state.preferences.panelWidth
+    eventNumber += 1
+    menuScrollSendMouse(.leftMouseDown, at: start, in: fixture.window, number: eventNumber)
+
+    func drag(to x: CGFloat, side: MenuPanelFixedSide, width: CGFloat) async throws {
+      eventNumber += 1
+      menuScrollSendMouse(
+        .leftMouseDragged, atScreen: CGPoint(x: x, y: y), in: fixture.window,
+        number: eventNumber)
+      try checkFrame(side: side, width: width)
+      await fixture.settle()
+      try checkFrame(side: side, width: width)
+      try checkHostedViews()
+      #expect(fixture.state.preferences.panelWidth == storedWidth)
+    }
+
+    let startEdge = startsOnRight ? button.maxX : button.minX
+    let releaseEdge = startsOnRight ? button.minX : button.maxX
+    let direction: CGFloat = startsOnRight ? 1 : -1
+    try await drag(to: startEdge - direction * 429, side: startSide, width: 430)
+    try await drag(to: startEdge - direction * 539, side: startSide, width: 540)
+    try await drag(to: button.midX + direction * 6, side: otherSide, width: 380)
+    try await drag(to: button.midX - direction * 6, side: startSide, width: 380)
+    try await drag(to: button.midX + direction * 6, side: otherSide, width: 380)
+
+    expectedWidth = cycle.isMultiple(of: 2) ? 470 : 510
+    let releaseX = releaseEdge + direction * (expectedWidth - 1)
+    try await drag(to: releaseX, side: otherSide, width: expectedWidth)
+    let releasedFrame = fixture.window.frame
+    let tabViewport = tab.contentView.bounds
+    let folderViewport = folder.contentView.bounds
+    eventNumber += 1
+    menuScrollSendMouse(
+      .leftMouseUp, atScreen: CGPoint(x: releaseX, y: y), in: fixture.window, number: eventNumber)
+    #expect(fixture.window.frame == releasedFrame)
+    await fixture.settle()
+    try checkFrame(side: otherSide, width: expectedWidth)
+    try checkHostedViews()
+    #expect(fixture.window.frame == releasedFrame)
+    #expect(tab.contentView.bounds == tabViewport)
+    #expect(folder.contentView.bounds == folderViewport)
+    #expect(abs(CGFloat(fixture.state.preferences.panelWidth) - expectedWidth) <= 0.5)
+  }
+  await fixture.state.quiescePersistenceForTesting()
+}
+
+@MainActor
 private func menuScrollResizeBeginReadiness(
   _ host: MenuPanelResizeHostView,
   at locationInWindow: CGPoint,

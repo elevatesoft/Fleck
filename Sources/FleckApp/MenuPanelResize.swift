@@ -1913,7 +1913,7 @@
       if geometryStoreChanged || preferredSizeChanged || !canResize {
         invalidateQueuedWork()
       }
-      reconcileNativePresentation()
+      scheduleReconcile()
     }
 
     func adoptInstallationAuthority(_ authority: MenuPanelResizeInstallationAuthority) {
