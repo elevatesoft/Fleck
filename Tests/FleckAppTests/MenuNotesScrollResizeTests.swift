@@ -676,8 +676,10 @@ func hostedStripsCrossOverflowOneAtATimeAndSurviveASafeAreaChange() async throws
 func hostedMenuResizeReleaseAcrossBothThresholdsKeepsScrollGeometry(widthBudget: Int) async throws {
   let screen = try #require(NSScreen.main)
   let visible = screen.visibleFrame
-  let buttonFrame = CGRect(x: visible.maxX - 64, y: visible.maxY + 2, width: 34, height: 22)
-  let wideWidth = min(1_040, min(visible.width, CGFloat(widthBudget)) - 64)
+  let rightMargin: CGFloat = 12
+  let buttonFrame = CGRect(
+    x: visible.maxX - rightMargin - 34, y: visible.maxY + 2, width: 34, height: 22)
+  let wideWidth = min(1_040, min(visible.width, CGFloat(widthBudget)) - rightMargin)
   let fixture = try await MenuNotesScrollFixture(
     width: 720,
     height: 415,
