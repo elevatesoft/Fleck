@@ -526,7 +526,10 @@
         ? snapshot.initialContentSize.height - deltaY
         : snapshot.initialContentSize.height
       let minimumWidth = handle.changesWidth
-        ? snapshot.statusLabelFrame.width - snapshot.frameInsets.horizontal
+        ? max(
+          minimumContentSize.width,
+          snapshot.statusLabelFrame.width - snapshot.frameInsets.horizontal
+        )
         : min(minimumContentSize.width, maximumWidth)
       guard maximumWidth >= minimumWidth, minimumWidth > 0 else { return nil }
       let width = min(max(requestedWidth, minimumWidth), maximumWidth)
@@ -1878,7 +1881,8 @@
 
     override func layout() {
       super.layout()
-      reconcileNativePresentation()
+      guard !isApplyingFrame else { return }
+      scheduleReconcile()
     }
 
     override func setFrameSize(_ newSize: NSSize) {

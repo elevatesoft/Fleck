@@ -582,7 +582,7 @@ import Testing
   )
   #expect(leftEquality.fixedSide == .left)
   #expect(leftEquality.frame.minX == snapshot.statusLabelFrame.minX)
-  #expect(leftEquality.frame.maxX == snapshot.statusLabelFrame.maxX)
+  #expect(leftEquality.frame.width == MenuPanelResizeGeometry.minimumContentSize.width)
   #expect(leftEquality.frame.minY == snapshot.initialFrame.minY)
   #expect(leftEquality.frame.height == snapshot.initialFrame.height)
 
@@ -605,7 +605,7 @@ import Testing
     )
   )
   #expect(switchedRight.fixedSide == .right)
-  #expect(switchedRight.frame.minX == snapshot.statusLabelFrame.minX)
+  #expect(switchedRight.frame.width == MenuPanelResizeGeometry.minimumContentSize.width)
   #expect(switchedRight.frame.maxX == snapshot.statusLabelFrame.maxX)
   #expect(switchedRight.frame.minY == snapshot.initialFrame.minY)
   #expect(switchedRight.frame.height == snapshot.initialFrame.height)
@@ -619,7 +619,7 @@ import Testing
     )
   )
   #expect(rightEquality.fixedSide == .right)
-  #expect(rightEquality.frame.minX == snapshot.statusLabelFrame.minX)
+  #expect(rightEquality.frame.width == MenuPanelResizeGeometry.minimumContentSize.width)
   #expect(rightEquality.frame.maxX == snapshot.statusLabelFrame.maxX)
   #expect(rightEquality.frame.minY == snapshot.initialFrame.minY)
   #expect(rightEquality.frame.height == snapshot.initialFrame.height)
@@ -644,7 +644,7 @@ import Testing
   )
   #expect(switchedLeft.fixedSide == .left)
   #expect(switchedLeft.frame.minX == snapshot.statusLabelFrame.minX)
-  #expect(switchedLeft.frame.maxX == snapshot.statusLabelFrame.maxX)
+  #expect(switchedLeft.frame.width == MenuPanelResizeGeometry.minimumContentSize.width)
   #expect(switchedLeft.frame.minY == snapshot.initialFrame.minY)
   #expect(switchedLeft.frame.height == snapshot.initialFrame.height)
 
@@ -763,9 +763,9 @@ import Testing
     )
   )
   #expect(band.fixedSide == .right)
-  #expect(band.frame.minX == snapshot.statusLabelFrame.minX)
   #expect(band.frame.maxX == snapshot.statusLabelFrame.maxX)
-  #expect(band.contentSize.width == 28)
+  #expect(band.contentSize.width == 380)
+  #expect(band.frame.width == 392)
 
   snapshot.visibleFrame = CGRect(x: 570, y: 0, width: 630, height: 900)
   snapshot.statusLabelFrame = CGRect(x: 580, y: 880, width: 40, height: 20)
@@ -779,7 +779,8 @@ import Testing
   )
   #expect(rejected.fixedSide == .left)
   #expect(rejected.frame.minX == snapshot.statusLabelFrame.minX)
-  #expect(rejected.frame.maxX == snapshot.statusLabelFrame.maxX)
+  #expect(rejected.contentSize.width == 380)
+  #expect(rejected.frame.width == 392)
 
   snapshot.frameInsets = MenuPanelFrameInsets(top: 16, left: 20, bottom: 6, right: 20)
   #expect(
@@ -811,7 +812,7 @@ import Testing
       visibleFrame: snapshot.visibleFrame
     )
   )
-  #expect(transient.contentSize.width == 40)
+  #expect(transient.contentSize.width == 380)
   #expect(transient.fixedSide == .right)
   let final = try #require(
     controller.finish(
@@ -821,6 +822,7 @@ import Testing
     )
   )
   #expect(final.contentSize == snapshot.initialContentSize)
+  #expect(final.frame == transient.frame)
   #expect(final.fixedSide == .right)
   #expect(final.frame.maxX == snapshot.statusLabelFrame.maxX)
   #expect(final.frame.width == 380)
@@ -841,7 +843,7 @@ import Testing
       visibleFrame: snapshot.visibleFrame
     )
   )
-  #expect(belowMinimum.contentSize.width == 40)
+  #expect(belowMinimum.contentSize.width == 380)
   let returnedLeft = try #require(
     controller.finish(
       statusLabelFrame: snapshot.statusLabelFrame,
@@ -850,6 +852,7 @@ import Testing
     )
   )
   #expect(returnedLeft.fixedSide == .left)
+  #expect(returnedLeft.frame == belowMinimum.frame)
   #expect(returnedLeft.contentSize.width == 380)
   #expect(returnedLeft.frame.minX == snapshot.statusLabelFrame.minX)
 }
@@ -2090,9 +2093,10 @@ import Testing
         try #require(controller.isTracking)
         let minimumPointer = CGPoint(x: buttonFrame.minX - 6, y: startOnScreen.y)
         if operation == .minimumRelease {
-          send(.leftMouseDragged, atScreen: minimumPointer)
+          let approach = CGPoint(x: buttonFrame.maxX - 420 + 1, y: startOnScreen.y)
+          send(.leftMouseDragged, atScreen: approach)
           try #require(controller.isTracking)
-          try #require(window.frame.width < MenuPanelResizeGeometry.minimumContentSize.width)
+          try #require(window.frame.width == 420)
         }
         let originalInteraction = try #require(controller.interactionIdentity(ownerID: owner))
         let newerPointer = CGPoint(x: startOnScreen.x - 80.375, y: startOnScreen.y)
@@ -2204,22 +2208,28 @@ import Testing
   let startOnScreen = window.convertPoint(toScreen: start)
   sendResizeMouseEvent(.leftMouseDown, atScreen: startOnScreen, to: window, number: 11_001)
   try #require(controller.isTracking)
-  let minimumPointer = CGPoint(x: buttonFrame.minX - 6, y: startOnScreen.y)
-  sendResizeMouseEvent(.leftMouseDragged, atScreen: minimumPointer, to: window, number: 11_002)
+  let releaseWidth: CGFloat = 410
+  let releasePointer = CGPoint(x: buttonFrame.maxX - releaseWidth + 1, y: startOnScreen.y)
+  let approach = CGPoint(x: releasePointer.x - 20, y: startOnScreen.y)
+  sendResizeMouseEvent(.leftMouseDragged, atScreen: approach, to: window, number: 11_002)
   try #require(controller.isTracking)
-  try #require(window.frame.width < MenuPanelResizeGeometry.minimumContentSize.width)
+  try #require(window.frame.width == releaseWidth + 20)
+  var adjustedReleaseContent = false
   var hidCompletedWindow = false
   var restarted = false
   var expectedFrame: CGRect?
   var expectedInteraction: MenuPanelResizeInteractionIdentity?
   let observation = controller.$effectiveContentSize.dropFirst().sink { size in
-    if !hidCompletedWindow, !controller.isTracking,
-      size?.width == MenuPanelResizeGeometry.minimumContentSize.width
+    if !adjustedReleaseContent, controller.isTracking, size?.width == releaseWidth {
+      adjustedReleaseContent = true
+      window.extraContentInset = 2
+    } else if !hidCompletedWindow, !controller.isTracking, size?.width == releaseWidth - 2
     {
       hidCompletedWindow = true
       window.orderOut(nil)
     } else if hidCompletedWindow, !restarted, size == nil, !controller.isTracking {
       restarted = true
+      window.extraContentInset = 0
       window.orderFront(nil)
       sendResizeMouseEvent(.leftMouseDown, atScreen: startOnScreen, to: window, number: 11_003)
       let newerPointer = CGPoint(x: startOnScreen.x - 80.375, y: startOnScreen.y)
@@ -2229,7 +2239,8 @@ import Testing
     }
   }
   defer { observation.cancel() }
-  sendResizeMouseEvent(.leftMouseUp, atScreen: minimumPointer, to: window, number: 11_005)
+  sendResizeMouseEvent(.leftMouseUp, atScreen: releasePointer, to: window, number: 11_005)
+  try #require(adjustedReleaseContent)
   try #require(hidCompletedWindow)
   try #require(restarted)
   let retainedFrame = try #require(expectedFrame)
@@ -2282,7 +2293,14 @@ import Testing
 private final class MenuPanelNativeRoundingWindow: NSWindow {
   var roundsFramesOutward = false
   var unexpectedWidth: CGFloat = 0
+  var extraContentInset: CGFloat = 0
   var onFrameChange: (() -> Void)?
+
+  override func contentRect(forFrameRect frameRect: NSRect) -> NSRect {
+    var rect = super.contentRect(forFrameRect: frameRect)
+    rect.size.width -= extraContentInset
+    return rect
+  }
 
   override func setFrame(_ frameRect: NSRect, display flag: Bool, animate animateFlag: Bool) {
     var frame = roundsFramesOutward ? frameRect.integral : frameRect
@@ -3627,9 +3645,11 @@ private final class MenuPanelNativeRoundingWindow: NSWindow {
   )
   let rightFlipScreenPoint = window.convertPoint(toScreen: CGPoint(x: 10, y: 200))
   sendResizeMouseEvent(.leftMouseDragged, atScreen: rightFlipScreenPoint, to: window, number: 73)
-  #expect(window.frame.minX == buttonFrame.minX)
+  let rightDragFrame = window.frame
   #expect(window.frame.maxX == buttonFrame.maxX)
+  #expect(window.frame.width == 380)
   sendResizeMouseEvent(.leftMouseUp, atScreen: rightFlipScreenPoint, to: window, number: 74)
+  #expect(window.frame == rightDragFrame)
 
   #expect(commits.count == 1)
   #expect(commits.first?.0 == CGSize(width: 380, height: 430))
@@ -3651,9 +3671,11 @@ private final class MenuPanelNativeRoundingWindow: NSWindow {
   sendResizeMouseEvent(.leftMouseDown, at: CGPoint(x: 1, y: 200), to: window, number: 76)
   let leftFlipScreenPoint = window.convertPoint(toScreen: CGPoint(x: 370, y: 200))
   sendResizeMouseEvent(.leftMouseDragged, atScreen: leftFlipScreenPoint, to: window, number: 77)
+  let leftDragFrame = window.frame
   #expect(window.frame.minX == buttonFrame.minX)
-  #expect(window.frame.maxX == buttonFrame.maxX)
+  #expect(window.frame.width == 380)
   sendResizeMouseEvent(.leftMouseUp, atScreen: leftFlipScreenPoint, to: window, number: 78)
+  #expect(window.frame == leftDragFrame)
   #expect(commits.count == 2)
   #expect(commits.last?.0 == CGSize(width: 380, height: 430))
   #expect(commits.last?.1.minX == buttonFrame.minX)
@@ -3902,7 +3924,10 @@ private final class MenuPanelNativeRoundingWindow: NSWindow {
     to: window,
     number: 83
   )
-  sendResizeMouseEvent(.leftMouseDragged, atScreen: bandPoint, to: window, number: 84)
+  let approach = CGPoint(x: buttonFrame.minX + 420 - 1, y: bandPoint.y)
+  sendResizeMouseEvent(.leftMouseDragged, atScreen: approach, to: window, number: 84)
+  try #require(controller.isTracking)
+  #expect(window.frame.width == 420)
   window.rejectedFrame = CGRect(
     x: buttonFrame.maxX - 380,
     y: initialFrame.minY,
@@ -4762,6 +4787,94 @@ private final class DisplayRecordingWindow: NSWindow {
 
   override func setFrame(_ frameRect: NSRect, display flag: Bool, animate: Bool) {
     displayImmediatelyFlags.append(flag)
+    super.setFrame(frameRect, display: flag, animate: animate)
+  }
+}
+
+@Test @MainActor func menuPanelLayoutDoesNotWriteTheHostFrameSynchronously() async throws {
+  let screen = try #require(NSScreen.main)
+  let visible = screen.visibleFrame
+  let buttonFrame = CGRect(x: visible.maxX - 90, y: visible.maxY + 2, width: 34, height: 22)
+  let statusButton = PublicStatusButtonFixture(screenFrame: buttonFrame)
+  let geometry = MenuPanelGeometryStore(windows: { [statusButton.window] })
+  geometry.rememberCompletedSide(.right)
+  let controller = MenuPanelResizeController()
+  let size = CGSize(width: 520, height: 400)
+  let window = MenuPanelFrameCorrectionWindow(
+    contentRect: CGRect(x: buttonFrame.maxX - size.width, y: visible.maxY - size.height,
+      width: size.width, height: size.height),
+    styleMask: .borderless, backing: .buffered, defer: false
+  )
+  window.isReleasedWhenClosed = false
+  let host = MenuPanelResizeHostView(controller: controller)
+  host.configure(geometryStore: geometry, preferredSize: size, canResize: true, onCommit: { _ in })
+  window.contentView = host
+  defer {
+    host.uninstall()
+    window.contentView = nil
+    window.orderOut(nil)
+  }
+  window.orderFront(nil)
+  host.installIfNeeded()
+  await settleResizeHost(host)
+  let settled = window.frame
+  try #require(settled.maxX == buttonFrame.maxX)
+  window.reportedFrame = settled.offsetBy(dx: -13, dy: 0)
+  let writesBeforeLayout = window.frameWrites
+  host.layout()
+  #expect(window.frameWrites == writesBeforeLayout)
+  #expect(window.reportedFrame != nil)
+  await withCheckedContinuation { continuation in
+    DispatchQueue.main.async { continuation.resume() }
+  }
+  #expect(window.frameWrites == writesBeforeLayout + 1)
+  #expect(window.frame == settled)
+
+  let point = CGPoint(x: 1, y: host.bounds.midY)
+  guard try await requireResizeBeginReadiness(host, at: point, in: window) else { return }
+  let start = window.convertPoint(toScreen: point)
+  sendResizeMouseEvent(.leftMouseDown, atScreen: start, to: window, number: 16_001)
+  try #require(controller.isTracking)
+  let firstDrag = CGPoint(x: start.x - 24, y: start.y)
+  sendResizeMouseEvent(.leftMouseDragged, atScreen: firstDrag, to: window, number: 16_002)
+  #expect(window.frame.width == settled.width + 24)
+
+  host.layout()
+  let laterDrag = CGPoint(x: start.x + 24, y: start.y)
+  sendResizeMouseEvent(.leftMouseDragged, atScreen: laterDrag, to: window, number: 16_003)
+  let laterFrame = window.frame
+  #expect(laterFrame.width == settled.width - 24)
+  #expect(controller.currentProposal?.frame == laterFrame)
+  let writesAfterDrag = window.frameWrites
+  await withCheckedContinuation { continuation in
+    DispatchQueue.main.async { continuation.resume() }
+  }
+  #expect(window.frameWrites == writesAfterDrag)
+  #expect(window.frame == laterFrame)
+  #expect(controller.currentProposal?.frame == laterFrame)
+
+  host.layout()
+  host.uninstall()
+  window.contentView = nil
+  let writesAfterDetach = window.frameWrites
+  await withCheckedContinuation { continuation in
+    DispatchQueue.main.async { continuation.resume() }
+  }
+  #expect(window.frameWrites == writesAfterDetach + 1)
+  #expect(window.frame == settled)
+  #expect(!controller.isTracking)
+}
+
+@MainActor
+private final class MenuPanelFrameCorrectionWindow: NSWindow {
+  var reportedFrame: NSRect?
+  private(set) var frameWrites = 0
+
+  override var frame: NSRect { reportedFrame ?? super.frame }
+
+  override func setFrame(_ frameRect: NSRect, display flag: Bool, animate: Bool) {
+    frameWrites += 1
+    reportedFrame = nil
     super.setFrame(frameRect, display: flag, animate: animate)
   }
 }
