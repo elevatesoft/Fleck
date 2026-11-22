@@ -1,11 +1,11 @@
 <h1 align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="Assets/Brand/fleck-lockup-white.png">
-    <img src="Assets/Brand/fleck-lockup-black.png" alt="Fleck" width="240">
+    <img src="Assets/Brand/fleck-lockup-black.png" alt="Fleck Fragment logo" width="240">
   </picture>
 </h1>
 
-<p align="center">Local-first notes for the macOS menu bar.</p>
+<p align="center">Fleck is a native macOS app for Markdown notes, with quick capture, focused editing, on-device dictation, and explicitly granted local agent access.</p>
 
 <p align="center">
   <a href="#requirements"><img alt="macOS 14+ deployment target" src="https://img.shields.io/badge/macOS-14%2B-111827?logo=apple&amp;logoColor=white"></a>
@@ -15,29 +15,38 @@
 </p>
 
 <p align="center">
-  <a href="#download-and-launch-fleck">Download</a> ·
+  <a href="#download-and-launch-fleck">Download &amp; launch</a> ·
   <a href="#documentation">Documentation</a> ·
-  <a href="#requirements">Developing</a> ·
+  <a href="#what-is-here">Features</a> ·
   <a href="#how-it-works">How it works</a> ·
   <a href="#architecture">Architecture</a> ·
-  <a href="#contributing">Contributing</a>
+  <a href="#requirements">Developing</a> ·
+  <a href="TESTING.md">Testing</a> ·
+  <a href="#contributing">Contributing</a> ·
+  <a href="SECURITY.md">Security</a>
 </p>
 
-Fleck turns speech into notes on your Mac. Apple Speech transcribes on-device;
-then, where available, a separate Apple Intelligence language model can tidy
-the text on-device through Foundation Models. Speech transcription doesn't
-require Apple Intelligence.
+---
 
-Open Fleck from the menu bar to dictate or type a note. Come back to format it
-in the native editor, file it in a folder, or link it to another note. Fleck
-keeps readable Markdown and rich-text formatting on your Mac, without a Fleck
-account or cloud sync.
+Fleck lives in your menu bar. Click it to jot a note, hold a shortcut to
+dictate, or use the optional [Agent Connector](#agent-connector) to let an
+authorized AI tool read or edit just the notes you choose. Notes are readable
+files on your Mac. Ordinary note-taking needs no account, cloud service,
+Fleck model download, or browser runtime.
 
-You can give an AI tool access to just the notes you choose. The optional
-[Agent Connector](#agent-connector) lets you grant a compatible client read or
-edit access, see what it changed, and undo eligible edits.
+Apple Speech transcribes on-device. Where available, a separate Apple
+Intelligence language model can tidy the text on-device through Foundation
+Models. Speech transcription doesn't require Apple Intelligence.
 
-![Fleck's dark workspace with Project notes open, two other note tabs, and a Reference.txt file shortcut](docs/images/fleck-workspace.png)
+| | |
+| --- | --- |
+| **Platform** | macOS 14 declared deployment target; see the release notes for download compatibility. |
+| **Stack** | Swift 6, SwiftUI shell, AppKit `NSTextView` editor, Apple on-device speech, [MCP Swift SDK](https://github.com/modelcontextprotocol/swift-sdk) for the agent bridge |
+| **Storage** | Readable Markdown notes, optional RTF sidecars, and JSON settings in Application Support; atomic writes plus a recovery snapshot |
+| **Network** | No cloud sync. Agent note requests use a private same-user Unix socket, not an inbound HTTP listener. Outbound event callbacks are separately opt-in. |
+| **License** | [MPL-2.0](LICENSE), with the boundaries in [NOTICE](NOTICE) and [Branding](BRANDING.md) |
+
+![Fleck dark workspace with Project notes, Image notes, and Next steps tabs, a Reference.txt file shortcut, and the native editor](docs/images/fleck-workspace.png)
 
 *The Project notes tab is open in the native editor. The toolbar puts dictation
 and formatting above the note, and the Reference.txt shortcut keeps a related
@@ -54,7 +63,8 @@ included, system requirements, signing information, and checksum.
 
 1. In the release's **Assets**, download the app ZIP, not a **Source code**
    archive. Compare the ZIP's SHA-256 with the checksum in the release notes.
-2. Extract the ZIP, drag the app into **Applications**, and open it from there.
+2. Extract the ZIP, then drag the app into **Applications**, keeping its name.
+   Open it from Applications.
    If macOS shows a security warning, check the release's signing notes and
    [Apple's guidance](https://support.apple.com/en-us/102445) before deciding
    whether to open it. Don't disable Gatekeeper.
@@ -92,6 +102,9 @@ Current source also lets you resize and rotate the image in place. Notes, RTF
 state, exports, and agent text retain absolute local-file Markdown references,
 so image content is not a portable or self-contained export.
 
+Selected-text drags preserve AppKit formatting, and the editor has optional
+scroll-edge blur. Agent Activity shows line diffs for eligible agent edits.
+
 Copying a selection that mixes text and images puts real image data on the
 clipboard: rich HTML with embedded PNG images, an RTFD flavor with in-memory
 attachments, and sanitized plain and RTF fallbacks that describe images instead
@@ -104,24 +117,18 @@ experimental source, and [Product](PRODUCT.md) for the intended note workflow.
 
 ## How it works
 
-- **Write.** Type from the menu-bar panel or pin it as a window. The AppKit editor
-  handles selection, input methods, spelling, undo, and accessibility through
-  the macOS text system.
-- **Dictate.** Use the microphone or global capture shortcut. Apple's on-device
-  recognizer transcribes the audio. Dictation can insert text in the editor or
-  file it through Smart Capture, with the Inbox as the fallback.
-- **Connect an agent.** Set up a profile in Settings and share the notes or folders
-  it needs. A request reaches Fleck over a private local socket and is checked
-  against those grants before it can touch a note.
+Fleck has three everyday flows. Each one ends in the same place: a single state owner (`AppState`) that applies the change and saves it.
 
-All three flows use the same workspace state (`AppState`) and save through
-`LocalStore`. The sections below show where their paths converge.
+1. **Write.** Click the menu-bar icon (or open the pinned window) and type. The editor is a real macOS text view with native selection, input methods, spelling, undo, and VoiceOver support. Edits go to `AppState`, which hands them to `LocalStore` to save.
+2. **Dictate.** Hold the global shortcut and speak. Apple's on-device recognizer transcribes, your personal dictionary corrects known terms, and optional cleanup is checked against the transcript. The result is inserted where you are, or filed by Smart Capture. If Fleck is unsure where it belongs, it goes to your Inbox.
+3. **Connect an agent (optional, off by default).** Create a profile, grant it capabilities, and share specific notes or an explicitly confirmed folder. A local MCP client talks to the `fleck-agent` helper, which talks to the app over a private socket. Every write names the revision it expects, so it cannot silently overwrite newer work, and applied changes show up in Activity, with Undo for eligible edits.
 
 ## Architecture
 
-Fleck separates the note model and persistence from the macOS interface and
-local agent process. The [architecture guide](ARCHITECTURE.md) goes deeper into
-those boundaries.
+Fleck is one Swift package with a deliberate dependency direction: portable
+note state at the bottom, macOS presentation on top, and optional integrations
+behind explicit boundaries. See [Architecture](ARCHITECTURE.md) for the
+system boundaries in more detail.
 
 ### Package structure
 
@@ -160,8 +167,8 @@ flowchart TB
 ```
 
 `FleckCore` has no UI dependency, and `FleckAgentProtocol` depends only on
-core value types. The app and the bridge meet across the protocol instead of
-importing each other. See [the package manifest](Package.swift) for the full
+core value types. The app and the bridge never import each other: they meet
+across the protocol. See [the package manifest](Package.swift) for the full
 build graph and [the lockfile](Package.resolved) for exact dependency pins.
 
 | Target | Responsibility |
@@ -217,10 +224,11 @@ flowchart LR
 Fleck stores readable Markdown note bodies, optional RTF sidecars, and JSON
 workspace and preference data under your Application Support directory.
 `AppState` debounces ordinary saves; `LocalStore` serializes access, replaces
-files atomically, and keeps a previous-generation snapshot for recovery. The
-data is **not encrypted by Fleck**; access is governed by macOS file permissions.
-Agent Connector credentials
-are stored in Keychain, not in note files or preferences. See the
+files atomically, and keeps a previous-generation snapshot for recovery.
+This makes the data inspectable and gives Fleck a recovery point. **It is not
+encryption**: software already running as your macOS user can operate within
+your user’s authority. Agent Connector secrets belong in Keychain, never in
+note files or preferences. See the
 [storage boundary](ARCHITECTURE.md#storage-boundary) for more detail.
 
 ### Dictation pipeline
@@ -328,10 +336,10 @@ The experimental Enhanced Local graph includes **NVIDIA Parakeet TDT 0.6B v2**
 for local transcript cleanup and Smart Capture routing. This is an opt-in
 debug path, not the ordinary app. Ordinary packages don't bundle either
 model's weights. The source manifests identify the weights; they don't install
-or activate them. Parakeet requires verified local
-assets and runtime readiness. For cleanup and model-assisted routing, an
-available Apple system model takes precedence; Gemma is an option only when
-the system model is unavailable and the local Gemma runtime is ready.
+or activate them. Parakeet requires verified local assets and runtime readiness.
+For cleanup and model-assisted routing, an available Apple system model takes
+precedence; Gemma is an option only when the system model is unavailable and
+the local Gemma runtime is ready.
 
 | | Ordinary build | With `FLECK_ENHANCED_CANDIDATE=1` |
 | --- | --- | --- |
@@ -352,9 +360,12 @@ download.
 - **Bounded integration.** Dictation and agent access fail closed or fall back to a safe local result rather than broadening access.
 - **Accessible and efficient.** Keyboard use, VoiceOver, Reduce Motion, contrast, idle CPU, memory pressure, and thermal state are architectural inputs, not afterthoughts.
 
-A new dependency needs a concrete runtime or maintenance benefit, compatible
-licensing, a reviewed pin, and no unnecessary effect on app size, network
-behavior, or idle resources. See the [project principles](#project-principles).
+Dependencies stay rare: a new one needs a concrete runtime or maintenance
+benefit, compatible licensing, a reviewed immutable resolution, and no
+unnecessary effect on the ordinary app's size, network behavior, or idle
+resources. The ordinary package pins the Model Context Protocol Swift SDK and
+Sparkle; their resolutions are recorded in [`Package.resolved`](Package.resolved).
+See the [project principles](#project-principles).
 
 ## Requirements
 
@@ -384,20 +395,21 @@ swift --version
 
 ## Get the source
 
-To inspect or test the canonical source:
-
-```sh
-git clone https://github.com/elevatesoft/Fleck.git
-cd Fleck
-```
-
-To contribute, [fork Fleck](CONTRIBUTING.md#set-up-a-fork), then clone your fork
-and add the canonical repository as `upstream`:
+[Fork the repository](CONTRIBUTING.md#set-up-a-fork) on GitHub, then clone your
+fork:
 
 ```sh
 git clone https://github.com/YOUR-USER/Fleck.git Fleck
 cd Fleck
 git remote add upstream https://github.com/elevatesoft/Fleck.git
+```
+
+If you only want to inspect or test the canonical source, clone the upstream
+URL directly instead:
+
+```sh
+git clone https://github.com/elevatesoft/Fleck.git
+cd Fleck
 ```
 
 ## Build and test
@@ -496,9 +508,9 @@ Motion, contrast, and resource efficiency as features evolve.
 
 ## Contributing
 
-Use [GitHub Issues](https://github.com/elevatesoft/Fleck/issues) for ordinary
-bugs and proposals. Before opening a focused pull request, read
-[Contributing](CONTRIBUTING.md), [Testing](TESTING.md), and the
+Public [issues](https://github.com/elevatesoft/Fleck/issues) and pull requests
+are open for ordinary bugs, feature proposals, and focused contributions.
+Start with [Contributing](CONTRIBUTING.md), [Testing](TESTING.md), and the
 [Code of Conduct](CODE_OF_CONDUCT.md).
 
 Keep sensitive reports out of public issues and pull requests. Use the private
@@ -515,6 +527,7 @@ to the license notices and terms accompanying those revisions. No contributor
 license agreement is required. The Fleck name, logo, and other brand assets are
 reserved separately; the source license does not grant trademark rights.
 
-Dependencies, data, and models keep their own terms. Exact pins and
+Ordinary Swift dependencies include MIT- and Apache-2.0-licensed code;
+documentation, data, and models can carry other terms. Exact pins and
 attributions are recorded in the package lockfiles and
 [`ThirdPartyNotices.md`](Sources/FleckApp/Resources/ThirdPartyNotices.md).
