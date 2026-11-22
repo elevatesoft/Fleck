@@ -157,9 +157,12 @@ private func sameColor(_ first: NSColor, _ second: NSColor) -> Bool {
 private func changedPixelCount(
   in region: NSRect,
   fixture: GutterFixture,
-  render: GutterRender
+  render: GutterRender,
+  diagnose: Bool = false
 ) -> Int {
   var count = 0
+  var bounds = CGRect.null
+  var firstRGB = ""
   for x in stride(from: region.minX, through: region.maxX, by: 0.5) {
     for y in stride(from: region.minY, through: region.maxY, by: 0.5) {
       let point = NSPoint(x: x, y: y)
@@ -167,8 +170,21 @@ private func changedPixelCount(
         let before = bitmapPixel(render.reference, textViewPoint: point, fixture: fixture, scale: render.scale),
         let after = bitmapPixel(render.selected, textViewPoint: point, fixture: fixture, scale: render.scale)
       else { continue }
-      if !sameColor(before, after) { count += 1 }
+      if !sameColor(before, after) {
+        count += 1
+        if diagnose {
+          bounds = bounds.union(CGRect(x: x, y: y, width: 0.5, height: 0.5))
+          if firstRGB.isEmpty {
+            firstRGB = "\(before.redComponent),\(before.greenComponent),\(before.blueComponent),\(before.alphaComponent)"
+              + " -> \(after.redComponent),\(after.greenComponent),\(after.blueComponent),\(after.alphaComponent)"
+          }
+        }
+      }
     }
+  }
+  if diagnose {
+    print("Gutter diagnostic: scale=\(render.scale) opaque=\(fixture.textView.drawsBackground) "
+      + "band=\(region) changed=\(count) changedBounds=\(bounds) rgba=\(firstRGB)")
   }
   return count
 }
@@ -218,7 +234,7 @@ private func expectCleanGutter(
   ]
   #expect(bands[0].height + bands[1].height > 3)
   for band in bands where band.height > 0 {
-    #expect(changedPixelCount(in: band, fixture: fixture, render: render) == 0)
+    #expect(changedPixelCount(in: band, fixture: fixture, render: render, diagnose: true) == 0)
   }
 }
 
