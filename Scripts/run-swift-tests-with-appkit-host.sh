@@ -329,12 +329,16 @@ watch_host() {
   local mode="$2"
   local started_seconds="$SECONDS"
   local next_report="$SECONDS"
+  local deadline=$(( started_seconds + host_watchdog_seconds ))
   local pid rss output_bytes
+  if [[ "$mode" = run-shard-* ]]; then
+    deadline="$isolation_deadline"
+  fi
   trap '' HUP INT TERM
-  while (( SECONDS - started_seconds < host_watchdog_seconds )); do
+  while (( SECONDS < deadline )); do
     [[ -e "$active_completion_path" ]] && return 0
     /bin/kill -0 "$open_pid" 2>/dev/null || return 0
-    if [[ "${GITHUB_ACTIONS:-}" = true && "$mode" = run ]] &&
+    if [[ "${GITHUB_ACTIONS:-}" = true && ( "$mode" = run || "$mode" = run-shard-* ) ]] &&
       (( SECONDS >= next_report )); then
       rss=unavailable
       if pid="$(read_owned_host_pid)" && owned_host_is_running "$pid"; then
@@ -820,7 +824,7 @@ run_test_selection() {
   local phase="$2"
   local match_status matched_count identifier run_filter test_status output_status final_output_line
   set +e
-  /usr/bin/grep -E -- "$selection_regex" "$canonical_output" > "$matches"
+  LC_ALL=C /usr/bin/grep -E -- "$selection_regex" "$canonical_output" > "$matches"
   match_status=$?
   set -e
   if (( match_status == 2 )); then
@@ -888,6 +892,17 @@ run_test_selection() {
       'error: Swift test exited successfully without a final non-empty passing test summary' >&2
     exit 1
   fi
+  if [[ "$phase" = run-shard-* ]]; then
+    local executed_count
+    executed_count="$(printf '%s\n' "$final_output_line" | /usr/bin/awk '{print $5}')"
+    if [[ "$executed_count" != "$matched_count" ]]; then
+      printf 'error: %s selected %s tests but executed %s\n' \
+        "$phase" "$matched_count" "$executed_count" >&2
+      exit 1
+    fi
+    printf 'FLECK_APPKIT_ISOLATION shard=%s selected=%s executed=%s\n' \
+      "$phase" "$matched_count" "$executed_count"
+  fi
 }
 
 # Both phases use the same compiled bundle, host, and canonical test list. A
@@ -896,4 +911,34 @@ if [[ -n "$preflight_regex" ]]; then
   printf '%s\n' 'Running focused native preflight before the full test graph.'
   run_test_selection "$preflight_regex" preflight
 fi
-run_test_selection "$identifier_regex" run
+if [[ "${GITHUB_ACTIONS:-}" != true || -z "$preflight_regex" ]]; then
+  run_test_selection "$identifier_regex" run
+else
+  shard_selectors=(
+    '^FleckAppTests\.[A-Ca-c].*$'
+    '^FleckAppTests\.[D-Gd-g].*$'
+    '^FleckAppTests\.[H-Rh-r].*$'
+    '^(FleckAppTests\.[S-Zs-z]|(FleckAgentBridgeTests|FleckAgentProtocolTests|FleckCaptureLabTests|FleckCoreTests|FleckModelEvaluationTests|FleckPerformanceTests)\.).*$'
+  )
+  : > "$state_dir/shard-inventory"
+  for selector in "${shard_selectors[@]}"; do
+    if ! LC_ALL=C /usr/bin/grep -E -- "$selector" "$canonical_output" >> "$state_dir/shard-inventory"; then
+      printf 'error: empty AppKit isolation inventory for %s\n' "$selector" >&2
+      exit 3
+    fi
+  done
+  LC_ALL=C /usr/bin/sort -u "$canonical_output" > "$state_dir/full-inventory"
+  LC_ALL=C /usr/bin/sort "$state_dir/shard-inventory" > "$state_dir/sorted-shards"
+  if ! /usr/bin/cmp -s "$state_dir/full-inventory" "$state_dir/sorted-shards"; then
+    printf '%s\n' 'error: AppKit isolation inventories do not partition the full test list' >&2
+    exit 1
+  fi
+  readonly isolation_deadline=$(( SECONDS + host_watchdog_seconds ))
+  for shard in "${!shard_selectors[@]}"; do
+    if (( SECONDS >= isolation_deadline )); then
+      printf '%s\n' 'error: AppKit test hosts exceeded the shared watchdog budget' >&2
+      exit 124
+    fi
+    run_test_selection "${shard_selectors[$shard]}" "run-shard-$shard"
+  done
+fi
