@@ -376,13 +376,28 @@ func WorkspaceSearchHostingKeepsCompactSurfaceInsideMinimumWidth() async throws 
 
 @Test @MainActor func workspaceSearchActivationRestoreSurvivesAStuckSearchAttachment() async throws {
   let controller = WorkspaceSearchController()
+  let editor = NSTextView(frame: NSRect(x: 0, y: 0, width: 240, height: 60))
+  let window = NSWindow(
+    contentRect: editor.frame,
+    styleMask: [.titled],
+    backing: .buffered,
+    defer: false
+  )
+  window.contentView = editor
+  try #require(window.makeFirstResponder(window))
+  controller.setHostingWindow(window)
+  defer {
+    controller.present()
+    window.contentView = nil
+  }
+
   var restores = 0
   controller.present()
   let presentationID = controller.presentationID
   controller.setSearchAttachment(true, presentationID: presentationID)
   controller.setActivationFocusRestore {
     restores += 1
-    return true
+    return window.makeFirstResponder(editor) && window.firstResponder === editor
   }
 
   controller.dismiss()
@@ -394,6 +409,7 @@ func WorkspaceSearchHostingKeepsCompactSurfaceInsideMinimumWidth() async throws 
     "A search attachment that never detaches must not starve the activation focus restore"
   )
   #expect(restores == 1)
+  #expect(window.firstResponder === editor)
 }
 
 @Test @MainActor func workspaceSearchActivationRestoreRetriesPastLegacyYieldBudget() async throws {
