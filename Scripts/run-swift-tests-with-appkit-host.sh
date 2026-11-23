@@ -38,6 +38,11 @@ readonly package_root="$1"
 readonly scratch_path="$2"
 readonly identifier_regex="$3"
 readonly preflight_regex="${FLECK_TEST_APPKIT_PREFLIGHT_SELECTOR:-}"
+readonly isolation_probe="${FLECK_DIAGNOSTIC_ISOLATE_APPKIT:-0}"
+if [[ "$isolation_probe" != 0 && ( "$isolation_probe" != 1 || "$identifier_regex" != '^.+$' ) ]]; then
+  printf '%s\n' 'error: AppKit isolation diagnostic requires the full test request' >&2
+  exit 2
+fi
 if [[ ${FLECK_TEST_APPKIT_PREFLIGHT_SELECTOR+x} ]]; then
   if [[ "$identifier_regex" != '^.+$' || ${#preflight_regex} -le 2 ||
     ${#preflight_regex} -gt 160 || "$preflight_regex" != ^* ||
@@ -888,6 +893,17 @@ run_test_selection() {
       'error: Swift test exited successfully without a final non-empty passing test summary' >&2
     exit 1
   fi
+  if [[ "$phase" = run-shard-* ]]; then
+    local executed_count
+    executed_count="$(printf '%s\n' "$final_output_line" | /usr/bin/awk '{print $5}')"
+    if [[ "$executed_count" != "$matched_count" ]]; then
+      printf 'error: %s selected %s tests but executed %s\n' \
+        "$phase" "$matched_count" "$executed_count" >&2
+      exit 1
+    fi
+    printf 'FLECK_APPKIT_ISOLATION shard=%s selected=%s executed=%s\n' \
+      "$phase" "$matched_count" "$executed_count"
+  fi
 }
 
 # Both phases use the same compiled bundle, host, and canonical test list. A
@@ -896,4 +912,29 @@ if [[ -n "$preflight_regex" ]]; then
   printf '%s\n' 'Running focused native preflight before the full test graph.'
   run_test_selection "$preflight_regex" preflight
 fi
-run_test_selection "$identifier_regex" run
+if [[ "$isolation_probe" = 0 ]]; then
+  run_test_selection "$identifier_regex" run
+else
+  shard_selectors=(
+    '^FleckAppTests\.[A-Ca-c].*$'
+    '^FleckAppTests\.[D-Gd-g].*$'
+    '^FleckAppTests\.[H-Rh-r].*$'
+    '^(FleckAppTests\.[S-Zs-z]|(FleckAgentBridgeTests|FleckAgentProtocolTests|FleckCaptureLabTests|FleckCoreTests|FleckModelEvaluationTests|FleckPerformanceTests)\.).*$'
+  )
+  : > "$state_dir/shard-inventory"
+  for selector in "${shard_selectors[@]}"; do
+    if ! LC_ALL=C /usr/bin/grep -E -- "$selector" "$canonical_output" >> "$state_dir/shard-inventory"; then
+      printf 'error: empty AppKit isolation inventory for %s\n' "$selector" >&2
+      exit 3
+    fi
+  done
+  LC_ALL=C /usr/bin/sort -u "$canonical_output" > "$state_dir/full-inventory"
+  LC_ALL=C /usr/bin/sort "$state_dir/shard-inventory" > "$state_dir/sorted-shards"
+  if ! /usr/bin/cmp -s "$state_dir/full-inventory" "$state_dir/sorted-shards"; then
+    printf '%s\n' 'error: AppKit isolation inventories do not partition the full test list' >&2
+    exit 1
+  fi
+  for shard in "${!shard_selectors[@]}"; do
+    run_test_selection "${shard_selectors[$shard]}" "run-shard-$shard"
+  done
+fi
