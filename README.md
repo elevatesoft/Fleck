@@ -129,6 +129,17 @@ blur, and Agent Activity shows line diffs for eligible edits.
 See [Implementation status](IMPLEMENTATION_STATUS.md) for the short current
 roadmap and [Architecture](ARCHITECTURE.md) for the system boundaries.
 
+### Capy-theme design preview
+
+The light Capy theme in the Notes workspace and Appearance settings. These
+are design mockups, not screenshots of the downloadable app. Open either
+image for a closer look.
+
+<p>
+  <a href="docs/images/fleck-capy-notes.webp"><img src="docs/images/fleck-capy-notes.webp" alt="Capy-theme Notes mockup with a translucent editor, folder tabs, and formatting toolbar above a sample note" width="350"></a>
+  <a href="docs/images/fleck-capy-appearance.webp"><img src="docs/images/fleck-capy-appearance.webp" alt="Appearance settings mockup with Light mode, Capy colors, and Glass selected" width="350"></a>
+</p>
+
 ## How it works
 
 Fleck has three everyday flows. Each one ends in the same place: a single state owner (`AppState`) that applies the change and saves it.

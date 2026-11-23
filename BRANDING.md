@@ -37,6 +37,7 @@ branded product captures:
 - `docs/design/references/fleck-website-approved-direction-2026-08-01.png`
 - `Assets/fleck-mark.png`
 - `docs/images/fleck-workspace.png`
+- `docs/images/fleck-capy-notes.webp` and `docs/images/fleck-capy-appearance.webp` (design mockups)
 
 The maintainer has confirmed that the project owns or has the rights needed to
 publish these files as part of this repository and permit their unchanged
