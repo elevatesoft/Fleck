@@ -3380,8 +3380,18 @@
       if !selectedBulletPrefixes.isEmpty {
         let clippingPath = NSBezierPath(rect: dirtyRect)
         clippingPath.windingRule = .evenOdd
+        let context = NSGraphicsContext.current?.cgContext
         for prefix in selectedBulletPrefixes {
-          clippingPath.append(NSBezierPath(rect: prefix.selectionRect.intersection(dirtyRect)))
+          var exclusion = prefix.selectionRect
+          if let context {
+            let deviceRect = context.convertToDeviceSpace(exclusion)
+            let leading = deviceRect.minX.rounded(.down)
+            exclusion = context.convertToUserSpace(NSRect(
+              x: leading, y: deviceRect.minY,
+              width: deviceRect.maxX - leading, height: deviceRect.height
+            ))
+          }
+          clippingPath.append(NSBezierPath(rect: exclusion.intersection(dirtyRect)))
         }
         clippingPath.addClip()
       }

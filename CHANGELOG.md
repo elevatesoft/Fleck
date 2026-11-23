@@ -3,6 +3,12 @@
 All notable Fleck development changes are recorded here. This is development history, not a
 public release log. Packaging unchanged source does not add a changelog entry.
 
+## [1.8.76-beta.1] - 2026-11-23
+
+### Fixed
+
+- Prevent a stray selection highlight in the Notes editor’s bullet gutter.
+
 ## [1.8.68-beta.1] - 2026-11-21
 
 ### Fixed
