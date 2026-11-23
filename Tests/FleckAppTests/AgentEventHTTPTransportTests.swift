@@ -307,12 +307,12 @@ struct AgentEventHTTPTransportTests {
   @Test func fixturePortReadHasFiniteDeadline() {
     let pipe = Pipe()
     let start = DispatchTime.now().uptimeNanoseconds
-    let line = LocalTLSFixture.readLine(from: pipe.fileHandleForReading, timeoutSeconds: 0.05)
+    let result = LocalTLSFixture.readLine(from: pipe.fileHandleForReading, timeoutSeconds: 0.05)
     let elapsed = DispatchTime.now().uptimeNanoseconds - start
     try? pipe.fileHandleForReading.close()
     try? pipe.fileHandleForWriting.close()
 
-    #expect(line == nil)
+    #expect(result == .failure(.readinessTimedOut))
     #expect(elapsed < 1_000_000_000)
   }
 
@@ -1179,11 +1179,8 @@ private final class LocalTLSFixture: @unchecked Sendable {
       try JSONEncoder().encode(configuration).write(to: configurationURL, options: .atomic)
       try process.run()
       processWasStarted = true
-      guard let line = Self.readLine(from: output.fileHandleForReading, timeoutSeconds: 3),
-        let parsedPort = UInt16(line)
-      else {
-        throw HTTPFixtureError.failedToStart
-      }
+      let line = try Self.readLine(from: output.fileHandleForReading, timeoutSeconds: 3).get()
+      guard let parsedPort = UInt16(line) else { throw HTTPFixtureError.invalidReadinessPort }
       port = parsedPort
     } catch {
       let stopped = stop()
@@ -1246,26 +1243,44 @@ private final class LocalTLSFixture: @unchecked Sendable {
     return true
   }
 
-  fileprivate static func readLine(from handle: FileHandle, timeoutSeconds: TimeInterval) -> String?
-  {
+  fileprivate static func readLine(
+    from handle: FileHandle, timeoutSeconds: TimeInterval
+  ) -> Result<String, HTTPFixtureError> {
     let deadline =
       DispatchTime.now().uptimeNanoseconds
       + UInt64(max(timeoutSeconds, 0) * 1_000_000_000)
     var bytes = Data()
     while bytes.count < 8 {
       let now = DispatchTime.now().uptimeNanoseconds
-      guard now < deadline else { return nil }
+      guard now < deadline else { return .failure(.readinessTimedOut) }
       let remainingNanoseconds = deadline - now
       let waitMilliseconds = Int32(
         min((remainingNanoseconds + 999_999) / 1_000_000, UInt64(Int32.max)))
       var descriptor = pollfd(fd: handle.fileDescriptor, events: Int16(POLLIN), revents: 0)
-      guard Darwin.poll(&descriptor, 1, waitMilliseconds) > 0 else { return nil }
+      let readiness = Darwin.poll(&descriptor, 1, waitMilliseconds)
+      if readiness == 0 { return .failure(.readinessTimedOut) }
+      if readiness < 0 {
+        let error = errno
+        if error == EINTR { continue }
+        return .failure(.readinessPollFailed(error))
+      }
       var byte: UInt8 = 0
-      guard Darwin.read(handle.fileDescriptor, &byte, 1) == 1 else { return nil }
-      if byte == 10 { return String(data: bytes, encoding: .utf8) }
+      let count = Darwin.read(handle.fileDescriptor, &byte, 1)
+      if count == 0 { return .failure(.readinessPipeClosed) }
+      if count < 0 {
+        let error = errno
+        if error == EINTR { continue }
+        return .failure(.readinessReadFailed(error))
+      }
+      if byte == 10 {
+        guard let line = String(data: bytes, encoding: .utf8) else {
+          return .failure(.invalidReadinessLine)
+        }
+        return .success(line)
+      }
       bytes.append(byte)
     }
-    return nil
+    return .failure(.invalidReadinessLine)
   }
 
   private static let serverScript = #"""
@@ -1374,7 +1389,12 @@ private final class LocalTLSFixture: @unchecked Sendable {
 }
 
 private enum HTTPFixtureError: Error, Equatable {
-  case failedToStart
+  case readinessTimedOut
+  case readinessPipeClosed
+  case readinessPollFailed(Int32)
+  case readinessReadFailed(Int32)
+  case invalidReadinessLine
+  case invalidReadinessPort
   case processFailed
   case processDidNotStop
   case requestTimedOut
