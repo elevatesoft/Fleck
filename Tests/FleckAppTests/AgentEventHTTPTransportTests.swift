@@ -608,7 +608,7 @@ struct AgentEventHTTPTransportTests {
 
   @Test func curlPinsThePublicSockaddrThenUsesTestOnlyLoopbackTLS() throws {
     let certificate = try SyntheticTLSCertificate.make(hostname: "hook.example")
-    let fixture = try LocalTLSFixture(certificate: certificate)
+    let fixture = try LocalTLSFixture(certificate: certificate, diagnoseStartup: true)
     defer { fixture.remove() }
     let body = Data([0x7b, 0x00, 0xff, 0x7d])
     let signature = try makeSignature(body: body)
@@ -1151,15 +1151,24 @@ private final class LocalTLSFixture: @unchecked Sendable {
   private let process: Process
   private let termination = DispatchSemaphore(value: 0)
   private let logURL: URL
+  private let diagnoseStartup: Bool
   private var processWasStarted = false
   private(set) var port: UInt16 = 0
 
-  init(certificate: SyntheticTLSCertificate, configuration: FixtureConfiguration = .init()) throws {
+  init(
+    certificate: SyntheticTLSCertificate, configuration: FixtureConfiguration = .init(),
+    diagnoseStartup: Bool = false
+  ) throws {
     let ownedRoot = try OwnedMCPFixtureRoot.create(kind: .eventHTTPTransport)
     self.ownedRoot = ownedRoot
+    self.diagnoseStartup = diagnoseStartup
     let directoryURL = ownedRoot.url
     let configurationURL = directoryURL.appendingPathComponent("configuration.json")
     logURL = directoryURL.appendingPathComponent("events.json")
+    let traceURL = directoryURL.appendingPathComponent("startup.trace")
+    let trace: FileHandle? =
+      diagnoseStartup && FileManager.default.createFile(atPath: traceURL.path, contents: nil)
+      ? try? FileHandle(forWritingTo: traceURL) : nil
     let process = Process()
     self.process = process
     process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
@@ -1169,25 +1178,61 @@ private final class LocalTLSFixture: @unchecked Sendable {
       certificate.privateKeyURL.path,
       configurationURL.path,
       logURL.path,
+      diagnoseStartup ? "1" : "0",
     ]
     let output = Pipe()
     process.standardOutput = output
-    process.standardError = FileHandle.nullDevice
+    process.standardError = trace ?? FileHandle.nullDevice
     process.standardInput = FileHandle.nullDevice
     process.terminationHandler = { [termination] _ in termination.signal() }
+    var launchBegan: UInt64?
+    var launchReturned: UInt64?
+    var readFinished: UInt64?
+    var outcome = "not-read"
+
+    func recordStartup() {
+      guard diagnoseStartup else { return }
+      let launchMS = launchBegan.flatMap { begin in launchReturned.map { ($0 - begin) / 1_000_000 } }
+      let readyMS = launchReturned.flatMap { begin in readFinished.map { ($0 - begin) / 1_000_000 } }
+      print(
+        "FLECK_TLS_STARTUP parent outcome=\(outcome) launch_ms=\(launchMS.map(String.init) ?? "unknown") read_ms=\(readyMS.map(String.init) ?? "unknown") trace=\(trace == nil ? "unavailable" : "available")"
+      )
+      let allowed: Set<String> = [
+        "python-entered", "imports-complete", "config-loaded", "tls-context-ready",
+        "cert-chain-loaded", "socket-bound", "listening", "ready-to-write",
+      ]
+      let lines = (try? String(contentsOf: traceURL, encoding: .utf8))?.split(separator: "\n") ?? []
+      var first: UInt64?
+      for line in lines {
+        let fields = line.split(separator: " ")
+        guard fields.count == 3, fields[0] == "tls-startup", allowed.contains(String(fields[1])),
+          let timestamp = UInt64(fields[2])
+        else { continue }
+        if first == nil { first = timestamp }
+        guard let first, timestamp >= first else { continue }
+        print("FLECK_TLS_STARTUP child stage=\(fields[1]) elapsed_ms=\((timestamp - first) / 1_000_000)")
+      }
+    }
+
+    defer { try? trace?.close() }
     do {
       try JSONEncoder().encode(configuration).write(to: configurationURL, options: .atomic)
+      launchBegan = DispatchTime.now().uptimeNanoseconds
       try process.run()
+      launchReturned = DispatchTime.now().uptimeNanoseconds
       processWasStarted = true
-      guard let line = Self.readLine(from: output.fileHandleForReading, timeoutSeconds: 3),
-        let parsedPort = UInt16(line)
-      else {
+      let line = Self.readLine(from: output.fileHandleForReading, timeoutSeconds: 3) { outcome = $0 }
+      readFinished = DispatchTime.now().uptimeNanoseconds
+      guard let line, let parsedPort = UInt16(line) else {
+        if line != nil { outcome = "invalid-port" }
         throw HTTPFixtureError.failedToStart
       }
       port = parsedPort
+      recordStartup()
     } catch {
       let stopped = stop()
       try? output.fileHandleForReading.close()
+      recordStartup()
       if stopped {
         do { try ownedRoot.cleanup() }
         catch { Issue.record("The failed local TLS fixture root could not be cleaned: \(error)") }
@@ -1235,43 +1280,80 @@ private final class LocalTLSFixture: @unchecked Sendable {
 
   private func stop() -> Bool {
     guard processWasStarted else { return true }
-    if process.isRunning { process.terminate() }
+    let wasRunning = process.isRunning
+    if wasRunning { process.terminate() }
     var stopped = termination.wait(timeout: .now() + 1) == .success
     if !stopped && process.isRunning {
       _ = Darwin.kill(process.processIdentifier, SIGKILL)
     }
     if !stopped { stopped = termination.wait(timeout: .now() + 1) == .success }
-    guard stopped && !process.isRunning else { return false }
+    guard stopped && !process.isRunning else {
+      if diagnoseStartup { print("FLECK_TLS_STARTUP child termination=unconfirmed") }
+      return false
+    }
+    if diagnoseStartup {
+      let reason = process.terminationReason == .exit ? "exit" : "signal"
+      print(
+        "FLECK_TLS_STARTUP child termination=\(reason) status=\(process.terminationStatus) running_at_cleanup=\(wasRunning)"
+      )
+    }
     processWasStarted = false
     return true
   }
 
-  fileprivate static func readLine(from handle: FileHandle, timeoutSeconds: TimeInterval) -> String?
-  {
+  fileprivate static func readLine(
+    from handle: FileHandle, timeoutSeconds: TimeInterval, note: (String) -> Void = { _ in }
+  ) -> String? {
     let deadline =
       DispatchTime.now().uptimeNanoseconds
       + UInt64(max(timeoutSeconds, 0) * 1_000_000_000)
     var bytes = Data()
     while bytes.count < 8 {
       let now = DispatchTime.now().uptimeNanoseconds
-      guard now < deadline else { return nil }
+      guard now < deadline else {
+        note("deadline")
+        return nil
+      }
       let remainingNanoseconds = deadline - now
       let waitMilliseconds = Int32(
         min((remainingNanoseconds + 999_999) / 1_000_000, UInt64(Int32.max)))
       var descriptor = pollfd(fd: handle.fileDescriptor, events: Int16(POLLIN), revents: 0)
-      guard Darwin.poll(&descriptor, 1, waitMilliseconds) > 0 else { return nil }
+      let pollResult = Darwin.poll(&descriptor, 1, waitMilliseconds)
+      let pollErrno = errno
+      guard pollResult > 0 else {
+        note(pollResult == 0 ? "poll-timeout" : "poll-error:\(pollErrno)")
+        return nil
+      }
       var byte: UInt8 = 0
-      guard Darwin.read(handle.fileDescriptor, &byte, 1) == 1 else { return nil }
-      if byte == 10 { return String(data: bytes, encoding: .utf8) }
+      let readResult = Darwin.read(handle.fileDescriptor, &byte, 1)
+      let readErrno = errno
+      guard readResult == 1 else {
+        note(readResult == 0 ? "pipe-eof" : "read-error:\(readErrno)")
+        return nil
+      }
+      if byte == 10 {
+        let line = String(data: bytes, encoding: .utf8)
+        note(line == nil ? "invalid-utf8" : "line-read")
+        return line
+      }
       bytes.append(byte)
     }
+    note("line-too-long")
     return nil
   }
 
   private static let serverScript = #"""
-    import json, os, socket, ssl, struct, sys, time
+    import sys, time
+    trace_startup = sys.argv[5] == "1"
+    def startup(stage):
+        if trace_startup:
+            sys.stderr.write("tls-startup {} {}\n".format(stage, time.monotonic_ns()))
+    startup("python-entered")
+    import json, os, socket, ssl, struct
+    startup("imports-complete")
     cert_path, key_path, config_path, log_path = sys.argv[1:5]
     config = json.load(open(config_path, "r"))
+    startup("config-loaded")
     events = []
     def record(value):
         events.append(value)
@@ -1283,16 +1365,21 @@ private final class LocalTLSFixture: @unchecked Sendable {
         os.replace(temporary, log_path)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
+    startup("tls-context-ready")
     context.load_cert_chain(cert_path, key_path)
+    startup("cert-chain-loaded")
     def server_name(_connection, name, _context):
         record({"kind": "sni", "name": name})
     context.set_servername_callback(server_name)
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     listener.bind(("127.0.0.1", 0))
+    startup("socket-bound")
     listener.listen(max(1, config.get("maximumConnections", 1)))
+    startup("listening")
     listener.settimeout(10)
     port = listener.getsockname()[1]
+    startup("ready-to-write")
     print(port, flush=True)
     for _ in range(config.get("maximumConnections", 1)):
         try:
