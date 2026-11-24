@@ -11,7 +11,7 @@
   <a href="#requirements"><img alt="macOS 14+ deployment target" src="https://img.shields.io/badge/macOS-14%2B-111827?logo=apple&amp;logoColor=white"></a>
   <a href="Package.swift"><img alt="Swift 6" src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&amp;logoColor=white"></a>
   <a href="https://github.com/elevatesoft/Fleck/actions/workflows/ci.yml?query=branch%3Amain"><img alt="CI status for main" src="https://github.com/elevatesoft/Fleck/actions/workflows/ci.yml/badge.svg?branch=main"></a>
-  <a href="LICENSE"><img alt="License: MPL-2.0" src="https://img.shields.io/badge/license-MPL--2.0-6355a6"></a>
+  <a href="LICENSE"><img alt="License: MPL-2.0" src="https://img.shields.io/badge/license-MPL--2.0-456AF6"></a>
 </p>
 
 <p align="center">
@@ -88,11 +88,11 @@ for the current release gates.
 
 ## What is here
 
-![Fleck dark workspace with Project notes, Image notes, and Next steps tabs, a Reference.txt file shortcut, and the native editor](docs/images/fleck-workspace.png)
+![Fleck workspace mockup in Capy Dark Solid with folders, the formatting and dictation toolbar, and file shortcuts above a Release checklist note](docs/images/fleck-workspace.png)
 
-Illustration from a development build with synthetic notes and a sample file
-shortcut. The Project notes tab shows where you write, format, and dictate;
-the file shortcut opens a local reference without importing it.
+Capy Dark Solid design mockup with a sample note and file shortcuts. The
+Release checklist shows where you write, format, and dictate; file shortcuts
+open local references without importing them into the note.
 
 The ordinary build from public `main` contains:
 
@@ -128,17 +128,6 @@ blur, and Agent Activity shows line diffs for eligible edits.
 
 See [Implementation status](IMPLEMENTATION_STATUS.md) for the short current
 roadmap and [Architecture](ARCHITECTURE.md) for the system boundaries.
-
-### Capy-theme design preview
-
-The light Capy theme in the Notes workspace and Appearance settings. These
-are design mockups, not screenshots of the downloadable app. Open either
-image for a closer look.
-
-<p>
-  <a href="docs/images/fleck-capy-notes.webp"><img src="docs/images/fleck-capy-notes.webp" alt="Capy-theme Notes mockup with a translucent editor, folder tabs, and formatting toolbar above a sample note" width="350"></a>
-  <a href="docs/images/fleck-capy-appearance.webp"><img src="docs/images/fleck-capy-appearance.webp" alt="Appearance settings mockup with Light mode, Capy colors, and Glass selected" width="350"></a>
-</p>
 
 ## How it works
 
