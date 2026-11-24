@@ -111,7 +111,9 @@ public actor LocalStore {
     }
 
     var restoredWorkspace = workspace
-    restoredWorkspace.addRestoredNote(trashedNote.note)
+    if !restoredWorkspace.notes.contains(where: { $0.id == trashedNote.id }) {
+      restoredWorkspace.addRestoredNote(trashedNote.note)
+    }
     let result = try snapshotWriter.save(
       workspace: restoredWorkspace,
       preferences: preferences,

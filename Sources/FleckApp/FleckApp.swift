@@ -538,7 +538,8 @@
 
     convenience init(
       appState: AppState,
-      applicationSupportURL: URL = AgentBridgeEndpoint.applicationSupportURL()
+      applicationSupportURL: URL = AgentBridgeEndpoint.applicationSupportURL(),
+      modifierMonitor: any ModifierKeyMonitoring = ModifierKeyEventTap()
     ) {
       #if CLEAN_DICTATION_ENHANCED_CANDIDATE
         let enhancedComposition = DictationEnhancedCandidateComposition(
@@ -688,6 +689,7 @@
             DictationDestination(noteID: $0.id, title: $0.displayTitle)
           }
         },
+        monitor: modifierMonitor,
         onRegistrationError: { [weak appState] error in
           appState?.saveError = "Dictation shortcut: \(Self.shortcutMessage(error))"
         }

@@ -140,29 +140,47 @@
   struct AgentActivityIndicator: View {
     @Environment(\.fleckThemeSnapshot) private var theme
     @ObservedObject var presentation: AgentActivityIndicatorPresentation
+    var usesBell = false
     let action: () -> Void
 
     var body: some View {
       Button(action: action) {
-        HStack(spacing: 4) {
-          switch FleckMark.load(template: true) {
-          case .image(let mark):
-            Image(nsImage: mark)
-              .frame(width: 18, height: 18)
-          case .missingPackagedResource:
-            Text("!")
-              .foregroundStyle(theme.color(.error))
+        if usesBell {
+          Image(systemName: "bell")
+            .font(.system(size: 16))
+            .frame(width: 28, height: 28)
+            .overlay(alignment: .topTrailing) {
+              if let statusSymbol = presentation.state.statusSymbol {
+                Image(systemName: statusSymbol)
+                  .font(.system(size: 7, weight: .semibold))
+                  .foregroundStyle(presentation.state.statusColor(in: theme))
+                  .padding(2)
+                  .accessibilityHidden(true)
+              }
+            }
+            .contentShape(Rectangle())
+        } else {
+          HStack(spacing: 4) {
+            switch FleckMark.load(template: true) {
+            case .image(let mark):
+              Image(nsImage: mark)
+                .frame(width: 18, height: 18)
+            case .missingPackagedResource:
+              Text("!")
+                .foregroundStyle(theme.color(.error))
+            }
+            Image(systemName: presentation.state.statusSymbol ?? "circle.fill")
+              .font(.system(size: 7, weight: .semibold))
+              .foregroundStyle(presentation.state.statusColor(in: theme))
+              .opacity(presentation.state.statusSymbol == nil ? 0 : 1)
+              .frame(width: 9, height: 9)
           }
-          Image(systemName: presentation.state.statusSymbol ?? "circle.fill")
-            .font(.system(size: 7, weight: .semibold))
-            .foregroundStyle(presentation.state.statusColor(in: theme))
-            .opacity(presentation.state.statusSymbol == nil ? 0 : 1)
-            .frame(width: 9, height: 9)
+          .frame(width: 32, height: 22, alignment: .leading)
+          .contentShape(Rectangle())
         }
-        .frame(width: 32, height: 22, alignment: .leading)
-        .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
+      .fleckHoverFill(in: RoundedRectangle(cornerRadius: 6), isAllowed: usesBell)
       .accessibilityIdentifier("agent-activity-indicator")
       .accessibilityLabel(presentation.state.accessibilityLabel)
       .accessibilityHint("Open Agent Activity")

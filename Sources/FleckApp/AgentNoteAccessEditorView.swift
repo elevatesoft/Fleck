@@ -6,6 +6,7 @@
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @Environment(\.fleckThemeSnapshot) private var theme
+    @Environment(\.fleckChromeAppearance) private var appearance
     let note: Note
     let onDismiss: (() -> Void)?
     @State private var accessByProfileID: [UUID: AgentNoteAccessLevel] = [:]
@@ -22,61 +23,113 @@
     }
 
     var body: some View {
+      let chrome = NotesSolidChrome(theme: theme, appearance: appearance)
+      Group {
+        if chrome.isActive {
+          VStack(alignment: .leading, spacing: 0) {
+            Text("Agent access")
+              .font(.system(size: 13, weight: .semibold))
+              .accessibilityAddTraits(.isHeader)
+            ScrollView {
+              VStack(alignment: .leading, spacing: 12) {
+                accessRows(stacked: true)
+                error
+              }
+              .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.top, 20)
+            controls
+              .controlSize(.large)
+              .padding(.top, 10)
+          }
+          .padding(20)
+          .frame(width: 420, height: 224)
+          .background(chrome.dialogSurface)
+        } else {
+          legacyForm
+        }
+      }
+      .onAppear(perform: loadDraft)
+    }
+
+    private var legacyForm: some View {
       Form {
         Section("Agent access") {
-          if displayedProfiles.isEmpty {
-            Text("No active profiles")
-              .foregroundStyle(.secondary)
-          } else {
-            ForEach(displayedProfiles) { profile in
-              let rowState = AgentCapabilityPresentation.noteAccessRowState(
-                for: note.id,
-                profileID: profile.id,
-                baselineCapabilities: baselineCapabilities,
-                workspace: baselineWorkspace
-              )
-              let rowMessage = message(for: rowState)
-              Picker(
-                profile.displayName,
-                selection: binding(for: profile.id)
-              ) {
-                ForEach(AgentNoteAccessLevel.allCases, id: \.self) { level in
-                  Text(level.title).tag(level)
-                }
-              }
-              .accessibilityValue(
-                AgentCapabilityPresentation.noteAccessAccessibilityLabel(
-                  accessByProfileID[profile.id] ?? .off
-                )
-              )
-              .disabled(rowState != .editable)
-              .accessibilityHint(rowMessage ?? "")
-              .pickerStyle(.segmented)
-              if let rowMessage {
-                Text(rowMessage)
-                  .font(.caption)
-                  .foregroundStyle(.secondary)
-              }
-            }
-          }
+          accessRows(stacked: false)
         }
-
-        if let errorMessage {
-          Text(errorMessage)
-            .font(.caption)
-            .foregroundStyle(theme.color(.error))
-        }
-
-        HStack {
-          Spacer()
-          Button("Cancel") { closeEditor() }
-          Button("Save") { save() }
-            .keyboardShortcut(.defaultAction)
-        }
+        error
+        controls
       }
       .formStyle(.grouped)
       .frame(minWidth: 420, minHeight: 260)
-      .onAppear(perform: loadDraft)
+    }
+
+    @ViewBuilder
+    private func accessRows(stacked: Bool) -> some View {
+      if displayedProfiles.isEmpty {
+        Text("No active profiles")
+          .foregroundStyle(.secondary)
+      } else {
+        ForEach(displayedProfiles) { profile in
+          if stacked {
+            VStack(alignment: .leading, spacing: 8) {
+              Text(profile.displayName)
+                .font(.system(size: 13, weight: .medium))
+                .accessibilityHidden(true)
+              accessRow(profile, hidePickerLabel: true)
+            }
+          } else {
+            accessRow(profile, hidePickerLabel: false)
+          }
+        }
+      }
+    }
+
+    @ViewBuilder
+    private func accessRow(_ profile: AgentIntegrationProfile, hidePickerLabel: Bool) -> some View {
+      let rowState = AgentCapabilityPresentation.noteAccessRowState(
+        for: note.id, profileID: profile.id, baselineCapabilities: baselineCapabilities, workspace: baselineWorkspace
+      )
+      let rowMessage = message(for: rowState)
+      let picker = Picker(profile.displayName, selection: binding(for: profile.id)) {
+        ForEach(AgentNoteAccessLevel.allCases, id: \.self) { level in
+          Text(level.title).tag(level)
+        }
+      }
+      .accessibilityValue(
+        AgentCapabilityPresentation.noteAccessAccessibilityLabel(accessByProfileID[profile.id] ?? .off)
+      )
+      .disabled(rowState != .editable)
+      .accessibilityHint(rowMessage ?? "")
+      .pickerStyle(.segmented)
+      if hidePickerLabel {
+        picker.labelsHidden().accessibilityLabel(profile.displayName)
+      } else {
+        picker
+      }
+      if let rowMessage {
+        Text(rowMessage)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+    }
+
+    @ViewBuilder
+    private var error: some View {
+      if let errorMessage {
+        Text(errorMessage)
+          .font(.caption)
+          .foregroundStyle(theme.color(.error))
+      }
+    }
+
+    private var controls: some View {
+      HStack {
+        Spacer()
+        Button("Cancel") { closeEditor() }
+        Button("Save") { save() }
+          .keyboardShortcut(.defaultAction)
+      }
     }
 
     private func binding(for profileID: UUID) -> Binding<AgentNoteAccessLevel> {

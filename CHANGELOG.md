@@ -3,6 +3,21 @@
 All notable Fleck development changes are recorded here. This is development history, not a
 public release log. Packaging unchanged source does not add a changelog entry.
 
+## [1.9.1-beta.1] - 2026-11-24
+
+### Changed
+
+- Refine Monochrome Dark Solid Notes with a compact toolbar and font picker,
+  clearer folder and tab navigation, and more compact search and note-link results.
+- Align the Notes controls, Web Link popover and empty-state dialogs to the Dark
+  Solid layout while retaining native styling for the opened Options menu.
+
+### Fixed
+
+- Preserve the active note when restoring a note from Dark Solid Trash.
+- Close the pinned Dark Solid Notes window with Command-W without trashing the note.
+- Display decoded note-link labels in backlink excerpts without changing Markdown.
+
 ## [1.8.68-beta.1] - 2026-11-21
 
 ### Fixed

@@ -126,19 +126,16 @@ public enum NoteLinkParser {
     let end = min(max(start, NSMaxRange(range)), bodyLength)
     let requested = NSRange(location: start, length: end - start)
     let composedRange = source.rangeOfComposedCharacterSequences(for: requested)
-    let normalized = normalizedCharacters(in: body)
+    let parsedLinks = links(in: body)
+    let normalized = normalizedCharacters(in: source, links: parsedLinks)
     guard !normalized.characters.isEmpty else { return "" }
 
-    let matchingIndices = normalized.sourceOffsets.indices.filter { index in
-      let offset = normalized.sourceOffsets[index]
-      return offset >= composedRange.location && offset < NSMaxRange(composedRange)
-    }
-    let targetStart = matchingIndices.first ?? nearestIndex(
-      to: composedRange.location,
+    let link = parsedLinks.first { NSIntersectionRange($0.range, composedRange).length > 0 }
+    let targetStart = nearestIndex(
+      to: link?.labelRange.location ?? composedRange.location,
       in: normalized.sourceOffsets
     )
-    let link = links(in: body).first { NSIntersectionRange($0.range, composedRange).length > 0 }
-    let labelOffset = link.map { min(max(0, $0.label.count / 2 + 1), max(0, normalized.characters.count - targetStart - 1)) } ?? 0
+    let labelOffset = link.map { $0.label.count / 2 } ?? 0
     let center = min(normalized.characters.count - 1, targetStart + labelOffset)
 
     var lower = max(0, center - limit / 2)
@@ -211,27 +208,36 @@ public enum NoteLinkParser {
     let sourceOffsets: [Int]
   }
 
-  private static func normalizedCharacters(in body: String) -> NormalizedCharacters {
+  private static func normalizedCharacters(in body: NSString, links: [NoteLink]) -> NormalizedCharacters {
     var characters: [Character] = []
     var sourceOffsets: [Int] = []
-    var sourceOffset = 0
     var hasWhitespace = false
 
-    for character in body {
-      let currentOffset = sourceOffset
-      sourceOffset += character.utf16.count
-      if character.isWhitespace {
-        hasWhitespace = !characters.isEmpty
-        continue
-      }
-      if hasWhitespace {
-        characters.append(" ")
+    func append(_ text: String, at offset: Int, fromLabel: Bool = false) {
+      var sourceOffset = offset
+      for character in text {
+        let currentOffset = sourceOffset
+        if !fromLabel { sourceOffset += character.utf16.count }
+        if character.isWhitespace {
+          hasWhitespace = !characters.isEmpty
+          continue
+        }
+        if hasWhitespace {
+          characters.append(" ")
+          sourceOffsets.append(currentOffset)
+          hasWhitespace = false
+        }
+        characters.append(character)
         sourceOffsets.append(currentOffset)
-        hasWhitespace = false
       }
-      characters.append(character)
-      sourceOffsets.append(currentOffset)
     }
+    var cursor = 0
+    for link in links {
+      append(body.substring(with: NSRange(location: cursor, length: link.range.location - cursor)), at: cursor)
+      append(link.label, at: link.labelRange.location, fromLabel: true)
+      cursor = NSMaxRange(link.range)
+    }
+    append(body.substring(from: cursor), at: cursor)
     return NormalizedCharacters(characters: characters, sourceOffsets: sourceOffsets)
   }
 

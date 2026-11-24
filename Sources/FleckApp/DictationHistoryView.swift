@@ -183,56 +183,122 @@
 
   struct DictationHistoryView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.fleckThemeSnapshot) private var theme
     @StateObject private var model: DictationHistoryViewModel
     @ObservedObject private var history: DictationHistoryController
+    @FocusState private var headerFocus: HeaderAction?
+    private let notesChrome: NotesSolidChrome?
     let onOpenDestination: (UUID) -> Void
+
+    private enum HeaderAction { case clear, done }
 
     init(
       history: DictationHistoryController,
+      notesChrome: NotesSolidChrome? = nil,
       onOpenDestination: @escaping (UUID) -> Void
     ) {
       _model = StateObject(wrappedValue: DictationHistoryViewModel(controller: history))
       _history = ObservedObject(wrappedValue: history)
+      self.notesChrome = notesChrome?.isActive == true ? notesChrome : nil
       self.onOpenDestination = onOpenDestination
     }
 
     var body: some View {
       VStack(spacing: 0) {
-        HStack {
-          Text("Dictation History")
-            .font(.title2.weight(.semibold))
+        HStack(spacing: notesChrome == nil ? nil : 8) {
+          VStack(alignment: .leading, spacing: 6) {
+            Text("Dictation History")
+              .font(notesChrome == nil ? .title2.weight(.semibold) : .system(size: 20, weight: .semibold))
+              .accessibilityAddTraits(.isHeader)
+            if notesChrome != nil {
+              Text("Local transcripts · Kept for 30 days")
+                .font(.system(size: 12))
+                .foregroundStyle(theme.color(.caption))
+            }
+          }
+          .padding(.bottom, notesChrome == nil ? 0 : 6)
           Spacer()
-          Button("Clear History", role: .destructive) {
-            model.requestClear()
-          }
-          .disabled(history.records.isEmpty)
-          Button("Done") {
-            dismiss()
-          }
-          .keyboardShortcut(.defaultAction)
+          headerActions
         }
-        .padding()
+        .padding(.horizontal, notesChrome == nil ? 16 : 22)
+        .padding(.vertical, 16)
+        .frame(height: notesChrome == nil ? nil : 82)
+        .background {
+          if let notesChrome { notesChrome.historyHeader }
+        }
+        .overlay(alignment: .bottom) {
+          if let notesChrome {
+            Rectangle().fill(notesChrome.historySeparator).frame(height: 1)
+              .allowsHitTesting(false)
+              .accessibilityHidden(true)
+          }
+        }
 
-        Divider()
+        if notesChrome == nil { Divider() }
 
         if history.records.isEmpty {
-          ContentUnavailableView(
-            "No Dictation History",
-            systemImage: "waveform",
-            description: Text("Successful captures kept for recovery appear here for 30 days.")
-          )
+          if notesChrome != nil {
+            VStack(spacing: 0) {
+              Image(systemName: "waveform")
+                .font(.system(size: 36))
+                .foregroundStyle(theme.color(.textSecondary))
+                .frame(width: 48, height: 48)
+                .accessibilityHidden(true)
+              Text("No Dictation History")
+                .font(.system(size: 20, weight: .semibold))
+                .accessibilityAddTraits(.isHeader)
+                .padding(.top, 17)
+              Text("Successful captures kept for recovery appear here for 30 days.")
+                .font(.system(size: 14))
+                .foregroundStyle(theme.color(.textSecondary))
+                .lineSpacing(3)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 270)
+                .padding(.top, 15)
+            }
+            .padding(.bottom, 20)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+          } else {
+            ContentUnavailableView(
+              "No Dictation History",
+              systemImage: "waveform",
+              description: Text("Successful captures kept for recovery appear here for 30 days.")
+            )
+          }
+        } else if let notesChrome {
+          ScrollView {
+            LazyVStack(spacing: 0) {
+              ForEach(history.records) { record in
+                historyRow(record)
+                  .padding(.vertical, 12)
+                  .overlay(alignment: .bottom) {
+                    Rectangle().fill(notesChrome.historySeparator).frame(height: 1)
+                      .allowsHitTesting(false)
+                      .accessibilityHidden(true)
+                  }
+              }
+            }
+            .padding(.horizontal, 22)
+          }
         } else {
           List(history.records) { record in
-            HistoryRow(
-              record: record,
-              onOpenDestination: onOpenDestination,
-              onDelete: { model.requestDelete(record.id) }
-            )
+            historyRow(record)
           }
           .listStyle(.inset)
         }
       }
-      .frame(minWidth: 640, minHeight: 440)
+      .frame(minWidth: notesChrome == nil ? 640 : 680, minHeight: notesChrome == nil ? 440 : 490)
+      .background {
+        if let notesChrome { notesChrome.historySurface }
+      }
+      .overlay {
+        if let notesChrome {
+          RoundedRectangle(cornerRadius: 14)
+            .strokeBorder(notesChrome.historyOutline, lineWidth: 1)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+      }
       .task {
         await history.load()
       }
@@ -265,6 +331,37 @@
       } message: {
         Text(history.errorMessage ?? "")
       }
+    }
+
+    @ViewBuilder
+    private var headerActions: some View {
+      let isEmpty = history.records.isEmpty
+      let clear = Button("Clear History", role: .destructive) { model.requestClear() }
+      let done = Button("Done") { dismiss() }
+      if let notesChrome {
+        clear
+          .buttonStyle(NotesSolidActionStyle(width: 116, height: 32, ink: theme.color(isEmpty ? .caption : .error)))
+          .focused($headerFocus, equals: .clear)
+          .fleckNeutralControlOutline(isFocused: headerFocus == .clear, cornerRadius: 6)
+          .disabled(isEmpty)
+        done
+          .buttonStyle(NotesSolidActionStyle(
+            width: 66, height: 32, ink: theme.color(.accentText), surface: notesChrome.historyDone
+          ))
+          .focused($headerFocus, equals: .done)
+          .fleckNeutralControlOutline(isFocused: headerFocus == .done, cornerRadius: 6)
+          .keyboardShortcut(.defaultAction)
+      } else {
+        clear.disabled(isEmpty)
+        done.keyboardShortcut(.defaultAction)
+      }
+    }
+
+    private func historyRow(_ record: DictationHistoryRecord) -> some View {
+      HistoryRow(
+        record: record, solid: notesChrome != nil, onOpenDestination: onOpenDestination,
+        onDelete: { model.requestDelete(record.id) }
+      )
     }
 
     private var confirmationTitle: String {
@@ -303,6 +400,7 @@
 
   private struct HistoryRow: View {
     let record: DictationHistoryRecord
+    let solid: Bool
     let onOpenDestination: (UUID) -> Void
     let onDelete: () -> Void
 
@@ -340,7 +438,7 @@
           Spacer()
           Button("Delete", role: .destructive, action: onDelete)
         }
-        .buttonStyle(.borderless)
+        .modifier(HistoryRowButtonStyle(solid: solid))
       }
       .padding(.vertical, 8)
     }
@@ -369,6 +467,15 @@
     private func copy(_ text: String) {
       NSPasteboard.general.clearContents()
       NSPasteboard.general.setString(text, forType: .string)
+    }
+  }
+
+  private struct HistoryRowButtonStyle: ViewModifier {
+    let solid: Bool
+
+    func body(content: Content) -> some View {
+      if solid { content.buttonStyle(.bordered) }
+      else { content.buttonStyle(.borderless) }
     }
   }
 #endif

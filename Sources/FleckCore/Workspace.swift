@@ -213,9 +213,9 @@ public struct Workspace: Codable, Equatable, Sendable {
     notes = pinned + unpinned
   }
 
-  public mutating func addRestoredNote(_ note: Note) {
+  public mutating func addRestoredNote(_ note: Note, selectsRestoredNote: Bool = true) {
     guard !notes.contains(where: { $0.id == note.id }) else {
-      selectedNoteID = note.id
+      if selectsRestoredNote { selectedNoteID = note.id }
       return
     }
     var restored = note
@@ -228,7 +228,7 @@ public struct Workspace: Codable, Equatable, Sendable {
       ? (notes.lastIndex(where: \.isPinned).map { $0 + 1 } ?? 0)
       : notes.count
     notes.insert(restored, at: insertion)
-    selectedNoteID = restored.id
+    if selectsRestoredNote || selectedNoteID == nil { selectedNoteID = restored.id }
   }
 
   public mutating func ensureNoteExists(now: Date = Date()) {

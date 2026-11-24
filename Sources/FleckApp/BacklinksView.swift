@@ -5,6 +5,7 @@
   struct BacklinksView: View {
     let entries: [BacklinkSource]
     let foldersByID: [UUID: String]
+    var usesSolidNotesChrome = false
     let onOpen: (UUID) -> Void
 
     static func accessibilityLabel(for entry: BacklinkSource, folderName: String?) -> String {
@@ -78,6 +79,7 @@
               }
             }
           }
+          .frame(height: usesSolidNotesChrome ? min(150, 50 * CGFloat(entries.count)) : nil)
           .frame(maxHeight: 150)
         }
       }

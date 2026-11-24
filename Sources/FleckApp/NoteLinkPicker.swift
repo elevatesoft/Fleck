@@ -427,6 +427,8 @@
   }
 
   struct NoteLinkPickerView: View {
+    @Environment(\.fleckThemeSnapshot) private var theme
+    @Environment(\.fleckChromeAppearance) private var appearance
     @ObservedObject var controller: NoteLinkPickerController
     let notes: [Note]
     let foldersByID: [UUID: String]
@@ -435,6 +437,7 @@
     let currentSource: () -> (UUID, UInt64)?
     let onChoose: (UUID, NSRange) -> Void
     @FocusState private var isQueryFocused: Bool
+    @State private var resultsHeight: CGFloat = 220
 
     static func accessibilityLabel(
       for result: WorkspaceSearchResult,
@@ -446,6 +449,7 @@
     }
 
     var body: some View {
+      let compact = NotesSolidChrome(theme: theme, appearance: appearance).isActive
       ZStack(alignment: .top) {
         Color.clear
           .contentShape(Rectangle())
@@ -554,7 +558,7 @@
                       }
                       .frame(maxWidth: .infinity, alignment: .leading)
                       .padding(.horizontal, 8)
-                      .padding(.vertical, 6)
+                      .padding(.vertical, compact ? 9 : 6)
                       .background(
                         RoundedRectangle(cornerRadius: 6)
                           .fill(selected ? accent.opacity(0.14) : .clear)
@@ -568,8 +572,11 @@
                     .accessibilityAddTraits(selected ? .isSelected : [])
                   }
                 }
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                  if compact && height > 0 { resultsHeight = height }
+                }
               }
-              .frame(maxHeight: 220)
+              .frame(maxHeight: compact && controller.results.count <= 3 ? min(220, resultsHeight) : 220)
               .onChange(of: controller.highlightedNoteID) { _, noteID in
                 guard let noteID else { return }
                 scrollProxy.scrollTo(noteID, anchor: .center)
