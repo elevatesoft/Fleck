@@ -256,7 +256,7 @@ class NamespaceQualificationWorkflowTest(unittest.TestCase):
 
     def test_job_inventory_preserves_existing_jobs(self):
         self.assertEqual(
-            set(self.job_ids), set(ORIGINAL_JOBS) | {QUALIFICATION_JOB} | FRESH_AB_JOBS
+            set(self.job_ids), set(ORIGINAL_JOBS) | {QUALIFICATION_JOB, 'fresh-ab-resolve-preflight'} | FRESH_AB_JOBS
         )
         self.assertEqual(len(self.job_ids), len(set(self.job_ids)))
 
@@ -287,6 +287,29 @@ class NamespaceQualificationWorkflowTest(unittest.TestCase):
         self.assertIn("verify-restore restore", restore)
         for job in ORIGINAL_JOBS:
             self.assertTrue(all(j not in job_block(self.contents, job) for j in FRESH_AB_JOBS))
+
+    def test_resolve_preflight_has_no_cache_paths_or_required_checks(self):
+        job = "fresh-ab-resolve-preflight"
+        expected_guard = (
+            "${{ github.event_name == 'workflow_dispatch' && github.repository == 'elevatesoft/Fleck'"
+            " && github.ref == 'refs/heads/elevate/fleck-cache-resolve-preflight-v1'"
+            " && github.actor == 'exterminatorrat' && github.triggering_actor == 'exterminatorrat'"
+            " && github.run_attempt == 1 && inputs.namespace_qualification_only"
+            " && inputs.fresh_ab_admission == '' }}"
+        )
+        self.assertEqual(job_if(self.contents, job), expected_guard)
+        self.assertEqual(job_runs_on(self.contents, job), "macos-26")
+        self.assertTrue(job_name(self.contents, job).startswith("Diagnostic-only / "))
+        block = job_block(self.contents, job)
+        self.assertEqual(block.count("uses:"), 1)
+        self.assertIn("persist-credentials: false", block)
+        self.assertIn("contents: read", block)
+        self.assertNotIn("actions/cache", block)
+        self.assertNotIn("actions: write", block)
+        self.assertNotIn("github.token", block)
+        self.assertIn("bash .ci-cache-ab/resolve-preflight.sh", block)
+        for original in ORIGINAL_JOBS:
+            self.assertNotIn(job, job_block(self.contents, original))
 
     def test_every_original_job_skips_qualification_runs(self):
         for job_id in ORIGINAL_JOBS:

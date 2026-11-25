@@ -848,3 +848,25 @@ jobs:
           FLECK_COLD_SOURCE: ${{ needs.fresh-ab-cold.outputs.source }}
           FLECK_COLD_CHANGED: ${{ needs.fresh-ab-cold.outputs.changed }}
         run: bash .ci-cache-ab/warm-shot.sh restore measure
+
+  fresh-ab-resolve-preflight:
+    name: Diagnostic-only / SwiftPM resolve metadata preflight
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'elevatesoft/Fleck' && github.ref == 'refs/heads/elevate/fleck-cache-resolve-preflight-v1' && github.actor == 'exterminatorrat' && github.triggering_actor == 'exterminatorrat' && github.run_attempt == 1 && inputs.namespace_qualification_only && inputs.fresh_ab_admission == '' }}
+    runs-on: macos-26
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      FLECK_FRESH_QUALIFICATION: ${{ inputs.namespace_qualification_only }}
+    steps:
+      - name: Check out reviewed preflight source without persisted credentials
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Test the exact SwiftPM clone-profile allowlist
+        run: python3 -B -m unittest discover -s .ci-cache-ab -p test_seed_audit.py
+      - name: Resolve pinned dependencies and audit metadata without publishing
+        run: bash .ci-cache-ab/resolve-preflight.sh
