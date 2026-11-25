@@ -19,6 +19,7 @@ ORIGINAL_JOBS = (
     "ordinary-test-diagnostic",
 )
 QUALIFICATION_JOB = "namespace-qualification"
+FOCUS_REHEARSAL_JOB = "pr-shadow-focus-rehearsal"
 
 FULL_CI_JOBS = (
     "detect-changes",
@@ -55,6 +56,7 @@ EXPECTED_RUNS_ON = {
     "folder-navigator-diagnostic-enhanced": "macos-26",
     "ordinary-test-diagnostic": NATIVE_PROVIDER_RUNS_ON,
     QUALIFICATION_JOB: "macos-26",
+    FOCUS_REHEARSAL_JOB: "macos-26",
 }
 
 ORIGINAL_CONDITIONS = {
@@ -255,9 +257,31 @@ class NamespaceQualificationWorkflowTest(unittest.TestCase):
 
     def test_job_inventory_preserves_existing_jobs(self):
         self.assertEqual(
-            set(self.job_ids), set(ORIGINAL_JOBS) | {QUALIFICATION_JOB}
+            set(self.job_ids), set(ORIGINAL_JOBS) | {QUALIFICATION_JOB, FOCUS_REHEARSAL_JOB}
         )
         self.assertEqual(len(self.job_ids), len(set(self.job_ids)))
+
+    def test_focus_rehearsal_is_branch_dispatch_only_and_not_a_gate(self):
+        self.assertEqual(
+            job_if(self.contents, FOCUS_REHEARSAL_JOB),
+            "${{ github.event_name == 'workflow_dispatch' && "
+            "github.repository == 'elevatesoft/Fleck' && "
+            "github.ref == 'refs/heads/elevate/fleck-pr-shadow-rehearsal' && "
+            "github.actor == 'exterminatorrat' && inputs.namespace_qualification_only }}",
+        )
+        block = job_block(self.contents, FOCUS_REHEARSAL_JOB)
+        self.assertIn("name: Diagnostic-only / Synthetic PR focused native smoke", block)
+        self.assertIn("timeout-minutes: 30", block)
+        self.assertIn("DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer", block)
+        self.assertIn("persist-credentials: false", block)
+        self.assertIn("fetch-depth: 0", block)
+        self.assertIn("ref: ${{ github.sha }}", block)
+        self.assertIn("contents: read", block)
+        self.assertIn('bash .ci-rehearsal/run.sh native --phase focus', block)
+        self.assertNotRegex(block, r"(?m)^ +needs:")
+        self.assertNotRegex(block, r"actions/(?:cache|upload-artifact)|--phase parity")
+        for job in ORIGINAL_JOBS:
+            self.assertNotIn(FOCUS_REHEARSAL_JOB, job_block(self.contents, job))
 
     def test_every_original_job_skips_qualification_runs(self):
         for job_id in ORIGINAL_JOBS:

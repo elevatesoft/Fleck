@@ -701,3 +701,33 @@ jobs:
           else
             printf 'rg: absent\n'
           fi
+
+  pr-shadow-focus-rehearsal:
+    name: Diagnostic-only / Synthetic PR focused native smoke
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'elevatesoft/Fleck' && github.ref == 'refs/heads/elevate/fleck-pr-shadow-rehearsal' && github.actor == 'exterminatorrat' && inputs.namespace_qualification_only }}
+    runs-on: macos-26
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      FLECK_SHADOW_QUALIFICATION_ONLY: ${{ inputs.namespace_qualification_only }}
+    steps:
+      - name: Record first hosted step time
+        run: |
+          printf 'First hosted step UTC: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      - name: Check out exact rehearsal branch without caches
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Verify exact harness and keep hosted runner awake for AppKit host
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=all --ignored=matching)"
+          sudo -n pmset -a displaysleep 0 sleep 0
+      - name: Run cold positive and independent reachable-red specimens only
+        run: |
+          bash .ci-rehearsal/run.sh native --phase focus "$PWD" "$PWD/.ci-rehearsal/ci-pr-shadow-selector.py"
