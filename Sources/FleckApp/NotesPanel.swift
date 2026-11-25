@@ -2955,6 +2955,9 @@
         guard let editingFolderID, wasEditing, !isEditing,
           appState.workspace.folders.contains(where: { $0.id == editingFolderID })
         else { return }
+        #if DEBUG
+        FolderRenameFocusTrace.record("ownership.falling-edge rowNil=\(focusedRow == nil) token=\(renameFocusRequest)")
+        #endif
         commitFolderEditing(source: currentInteractionSource, preservingFocus: true)
       }
       .animation(
@@ -3223,6 +3226,9 @@
         if context.coordinator.focusRequest != focusRequest {
           context.coordinator.focusRequest = focusRequest
           context.coordinator.hasFocused = false
+          #if DEBUG
+          FolderRenameFocusTrace.record("token.consume token=\(focusRequest)")
+          #endif
         }
         if (field.currentEditor() as? NSTextView)?.hasMarkedText() != true,
           field.stringValue != text
@@ -3262,6 +3268,9 @@
           DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             let editor = currentEditor()
+            #if DEBUG
+            FolderRenameFocusTrace.record("field.transition.report \(FolderRenameFocusTrace.fieldState(self))")
+            #endif
             onOwnershipChange?(editor != nil && window?.firstResponder === editor)
           }
         }
@@ -3294,9 +3303,21 @@
           guard !hasFocused else { return }
           focusGeneration &+= 1
           let generation = focusGeneration
+          #if DEBUG
+          FolderRenameFocusTrace.record("request.scheduled token=\(focusRequest) call=\(generation)")
+          #endif
           DispatchQueue.main.async {
+            #if DEBUG
+            FolderRenameFocusTrace.record("request.executing token=\(self.focusRequest) call=\(generation) latest=\(self.focusGeneration) active=\(self.isActive) attached=\(field.window != nil)")
+            #endif
             guard self.isActive, self.focusGeneration == generation, field.window != nil else { return }
+            #if DEBUG
+            FolderRenameFocusTrace.record("request.before call=\(generation) \(FolderRenameFocusTrace.fieldState(field))")
+            #endif
             self.hasFocused = field.window?.makeFirstResponder(field) == true
+            #if DEBUG
+            FolderRenameFocusTrace.record("request.after call=\(generation) returnedTrue=\(self.hasFocused) \(FolderRenameFocusTrace.fieldState(field))")
+            #endif
             field.reportOwnershipAfterResponderTransition()
           }
         }
@@ -3307,10 +3328,16 @@
         }
 
         func controlTextDidBeginEditing(_ notification: Notification) {
+          #if DEBUG
+          FolderRenameFocusTrace.record("delegate.did-begin token=\(focusRequest)")
+          #endif
           setEditingOwnership(true)
         }
 
         func controlTextDidEndEditing(_ notification: Notification) {
+          #if DEBUG
+          FolderRenameFocusTrace.record("delegate.did-end token=\(focusRequest)")
+          #endif
           setEditingOwnership(false)
         }
 
@@ -3373,8 +3400,14 @@
       let isDisclosurePainted = frozenUnfiledDisclosure ?? showsUnfiledDisclosure
       return HStack(spacing: 0) {
         Button {
+          #if DEBUG
+          FolderRenameFocusTrace.record("unfiled.action.before rowNil=\(focusedRow == nil) token=\(renameFocusRequest)")
+          #endif
           focusedRow = .unfiled
           onSelect(nil)
+          #if DEBUG
+          FolderRenameFocusTrace.record("unfiled.action.after rowNil=\(focusedRow == nil) token=\(renameFocusRequest)")
+          #endif
         } label: {
           rowLabel(
             name: "Unfiled",
@@ -3846,6 +3879,9 @@
         if preservingFocus, editingFolderID != nil {
           focusedRow = nil
           renameFocusRequest &+= 1
+          #if DEBUG
+          FolderRenameFocusTrace.record("validation.failed request=\(renameFocusRequest) rowNil=\(focusedRow == nil)")
+          #endif
         }
       }
     }

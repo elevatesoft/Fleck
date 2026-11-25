@@ -485,11 +485,23 @@ struct FolderNavigatorPresentationTests {
     let duplicateEditor = try #require(renameField.currentEditor() as? NSTextView)
     try #require(duplicateEditor === fixture.window.firstResponder)
     #expect(duplicateEditor.string == "Personal")
+    #if DEBUG
+    FolderRenameFocusTrace.begin()
+    defer { FolderRenameFocusTrace.end() }
+    FolderRenameFocusTrace.record("test.before-held-save-second-click")
+    #endif
     try fixture.click(fixture.element(identifier: "folder-unfiled"))
+    #if DEBUG
+    FolderRenameFocusTrace.record("test.second-click-returned")
+    #endif
 
     let renameReady = try await fixture.waitForRenameEditor(
       folderID: folder.id, reportingValidationError: true
     )
+    #if DEBUG
+    FolderRenameFocusTrace.record("test.rename-ready=\(renameReady)")
+    FolderRenameFocusTrace.report()
+    #endif
     if !renameReady {
       let fields = fixture.textFields.filter { $0.accessibilityIdentifier() == renameIdentifier }
       let field = fields.first
