@@ -43,9 +43,10 @@ NORMAL_JOB_NAMES = {
 }
 
 NATIVE_PROVIDER_RUNS_ON = "macos-26"
+BLACKSMITH_BUILD_RUNS_ON = "blacksmith-6vcpu-macos-26"
 EXPECTED_RUNS_ON = {
     "detect-changes": "ubuntu-24.04",
-    "macos-build": NATIVE_PROVIDER_RUNS_ON,
+    "macos-build": BLACKSMITH_BUILD_RUNS_ON,
     "macos-validation": NATIVE_PROVIDER_RUNS_ON,
     "docs-validation": "ubuntu-24.04",
     "macos": "ubuntu-24.04",
@@ -196,7 +197,9 @@ class NamespaceQualificationWorkflowTest(unittest.TestCase):
             with self.subTest(workflow=workflow.name):
                 runners = re.findall(r"^    runs-on: (.+)$", contents, re.M)
                 self.assertTrue(runners)
-                self.assertLessEqual(set(runners), {"ubuntu-24.04", "macos-26"})
+                self.assertLessEqual(
+                    set(runners), {"ubuntu-24.04", "macos-26", BLACKSMITH_BUILD_RUNS_ON}
+                )
                 self.assertNotIn("native_runner_provider", contents)
 
     def test_all_other_runs_on_values_are_unchanged(self):
