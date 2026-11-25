@@ -329,7 +329,7 @@ watch_host() {
   local mode="$2"
   local started_seconds="$SECONDS"
   local next_report="$SECONDS"
-  local pid rss output_bytes
+  local pid rss rss_reason output_bytes vm disk_kib process_state process_command
   trap '' HUP INT TERM
   while (( SECONDS - started_seconds < host_watchdog_seconds )); do
     [[ -e "$active_completion_path" ]] && return 0
@@ -337,14 +337,39 @@ watch_host() {
     if [[ "${GITHUB_ACTIONS:-}" = true && "$mode" = run ]] &&
       (( SECONDS >= next_report )); then
       rss=unavailable
-      if pid="$(read_owned_host_pid)" && owned_host_is_running "$pid"; then
-        rss="$(/bin/ps -p "$pid" -o rss= 2>/dev/null | /usr/bin/tr -d '[:space:]')" ||
-          rss=unavailable
+      if [[ ! -f "$active_host_pid_path" || -L "$active_host_pid_path" ]]; then
+        rss_reason=pid_record_unavailable
+      elif ! pid="$(read_owned_host_pid)"; then
+        rss_reason=pid_record_invalid
+      elif ! /bin/kill -0 "$pid" 2>/dev/null; then
+        rss_reason=host_pid_not_live
+      elif ! process_state="$(/bin/ps -p "$pid" -o stat= 2>/dev/null)" ||
+        [[ -z "$process_state" || "$process_state" == *Z* ]]; then
+        rss_reason=host_process_state_unavailable
+      elif ! process_command="$(/bin/ps -ww -p "$pid" -o command= 2>/dev/null)" ||
+        [[ "$process_command" != *"$host_binary"* ]]; then
+        rss_reason=host_command_mismatch
+      elif rss="$(/bin/ps -p "$pid" -o rss= 2>/dev/null | /usr/bin/tr -d '[:space:]')" &&
+        [[ "$rss" =~ ^[0-9]+$ ]]; then
+        rss_reason=ok
+      else
+        rss_reason=ps_rss_unavailable
+        rss=unavailable
       fi
       output_bytes="$(/usr/bin/stat -f '%z' "$active_host_log_path" 2>/dev/null)" ||
         output_bytes=unavailable
       printf 'AppKit CI progress: elapsed=%ss host_rss_kib=%s output_bytes=%s\n' \
         "$((SECONDS - started_seconds))" "${rss:-unavailable}" "$output_bytes" >&3 || true
+      vm="$(/usr/bin/vm_stat 2>/dev/null | /usr/bin/awk '
+        /^Mach Virtual Memory Statistics/ { printf " page_bytes=%s", $8 }
+        /^Pages free:/ { sub(/[.]/, "", $3); printf " free_pages=%s", $3 }
+        /^Pages occupied by compressor:/ { sub(/[.]/, "", $5); printf " compressed_pages=%s", $5 }
+        /^Swapouts:/ { sub(/[.]/, "", $2); printf " swapouts=%s", $2 }
+      ')" || vm=
+      disk_kib="$(/bin/df -k "$state_dir" 2>/dev/null | /usr/bin/awk 'NR == 2 { print $4 }')" ||
+        disk_kib=
+      printf 'AppKit CI resources: rss_reason=%s disk_available_kib=%s%s\n' \
+        "$rss_reason" "${disk_kib:-unavailable}" "${vm:- vm_stat=unavailable}" >&3 || true
       next_report=$((SECONDS + 60))
     fi
     /bin/sleep 1

@@ -657,6 +657,24 @@ private func modelLibraryDescriptor(
     defer { NSEvent.removeMonitor(monitor) }
     NSApp.postEvent(mouseUp, atStart: true)
     NSApp.sendEvent(mouseDown)
+    if let probe, !receiptObserver.didReceiveMouseUp {
+      // Inspect but do not consume any queued mouse-up or change the receipt gate.
+      for mode: RunLoop.Mode in [.default, .eventTracking] {
+        let next = NSApp.nextEvent(
+          matching: .leftMouseUp,
+          until: .distantPast,
+          inMode: mode,
+          dequeue: false
+        )
+        let identity = next.flatMap { ModelsMouseEventIdentity(event: $0, window: window) }
+        let queueState = identity?.hasSameIdentity(as: mouseUpIdentity) == true
+          ? "expected" : (next == nil ? "empty" : "other")
+        print(
+          "MODELS_MOUSE_UP_QUEUE scenario=\(probe.scenario) ordinal=\(probe.ordinal) "
+            + "mode=\(mode.rawValue) queue=\(queueState) key=\(window.isKeyWindow)"
+        )
+      }
+    }
     let clock = ContinuousClock()
     let deadline = clock.now.advanced(by: .seconds(2))
     while !receiptObserver.didReceiveMouseUp {
