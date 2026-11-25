@@ -2700,11 +2700,7 @@ qualification_job = "namespace-qualification"
 native_jobs = (
     "macos-build", "macos-validation", "macos-enhanced", "ordinary-test-diagnostic",
 )
-native_routing = (
-    "runs-on: ${{ github.event_name == 'workflow_dispatch' && "
-    "inputs.native_runner_provider == 'github-hosted' && "
-    "'macos-26' || 'namespace-profile-fleck' }}"
-)
+native_routing = "runs-on: macos-26"
 full_ci_job_names = {
     "detect-changes": "Detect documentation-only changes",
     "macos-build": "macOS ordinary graph and package",
@@ -2737,11 +2733,9 @@ aggregate_condition = (
 )
 qualified_concurrency = (
     "  group: ci-${{ github.event_name == 'workflow_dispatch' && "
-    "inputs.namespace_qualification_only && 'namespace-qualification-' || "
+    "inputs.namespace_qualification_only && 'runner-qualification-' || "
     "github.event_name == 'workflow_dispatch' && "
-    "inputs.ordinary_test_diagnostic_selector != '' && 'focused-' || "
-    "github.event_name == 'workflow_dispatch' && "
-    "inputs.native_runner_provider == 'namespace' && 'namespace-native-' || '' }}"
+    "inputs.ordinary_test_diagnostic_selector != '' && 'focused-' || '' }}"
     "${{ github.event.pull_request.number || github.ref }}"
 )
 prior_concurrency = (
@@ -2781,39 +2775,6 @@ for input_name in ("folder_navigator_probe", "folder_navigator_recording"):
         if required not in input_block:
             raise SystemExit(f"{input_name} input omitted: {required}")
     input_blocks[input_name] = input_block
-
-provider_match = re.search(
-    r"^      native_runner_provider:\n(?:^ {8}.*\n)+", current_workflow, re.M
-)
-if provider_match is None:
-    raise SystemExit("native_runner_provider input is missing")
-provider_block = provider_match.group(0)
-if current_workflow.count(provider_block) != 1:
-    raise SystemExit("native_runner_provider input must occur exactly once")
-for required in ("required: false", "type: choice", "default: namespace"):
-    if required not in provider_block:
-        raise SystemExit(f"native_runner_provider input omitted: {required}")
-if re.findall(r"^          - (\S+)$", provider_block, re.M) != [
-    "github-hosted",
-    "namespace",
-]:
-    raise SystemExit(
-        "native_runner_provider must offer exactly GitHub-hosted and manual namespace"
-    )
-if (
-    native_routing.count("'macos-26'") != 1
-    or native_routing.count("'namespace-profile-fleck'") != 1
-    or native_routing.count("inputs.native_runner_provider == 'github-hosted'") != 1
-    or native_routing.find("github.event_name == 'workflow_dispatch'")
-    > native_routing.find("inputs.native_runner_provider == 'github-hosted'")
-    or native_routing.find("inputs.native_runner_provider == 'github-hosted'")
-    > native_routing.find("'macos-26'")
-    or not native_routing.endswith("'macos-26' || 'namespace-profile-fleck' }}")
-):
-    raise SystemExit(
-        "native runner routing must default to Namespace and keep GitHub-hosted "
-        "an explicit manual dispatch opt-in"
-    )
 
 supplemental_jobs = (
     (
@@ -2901,7 +2862,7 @@ for job_id, block, required_values in (
             diagnostic_only_name("macOS build and tests"),
             aggregate_condition,
             "needs: [detect-changes, docs-validation, macos-build, macos-validation, macos-enhanced]",
-            "runs-on: namespace-profile-fleck",
+            "runs-on: ubuntu-24.04",
         ),
     ),
 ):
@@ -2944,7 +2905,6 @@ job_ids = re.findall(
     r"^  ([a-z0-9-]+):\n", current_workflow[jobs_section.end():], re.M
 )
 existing_jobs = tuple(job_id for job_id in job_ids if job_id != qualification_job)
-native_expression = native_routing.removeprefix("runs-on: ")
 for job_id in job_ids:
     _, _, block = job_block(current_workflow, job_id)
     condition = re.search(r"^    if: (.+)$", block, re.M)
@@ -2953,10 +2913,9 @@ for job_id in job_ids:
     runner = re.search(r"^    runs-on: (.+)$", block, re.M)
     if runner is None:
         raise SystemExit(f"CI job {job_id} has no runner selection")
-    if (runner.group(1) == native_expression) != (job_id in native_jobs):
-        raise SystemExit(
-            f"CI job {job_id} must be one of the four manual Namespace provider jobs"
-        )
+    expected_runner = "ubuntu-24.04" if job_id in ("detect-changes", "docs-validation", "macos") else "macos-26"
+    if runner.group(1) != expected_runner:
+        raise SystemExit(f"CI job {job_id} must use standard GitHub-hosted {expected_runner}")
     if job_id == qualification_job:
         if condition.group(1) != (
             "${{ github.event_name == 'workflow_dispatch' && "
@@ -2968,8 +2927,8 @@ for job_id in job_ids:
 
 qualification = job_block(current_workflow, qualification_job)[2]
 for required in (
-    "name: Namespace runner metadata qualification",
-    "runs-on: namespace-profile-fleck",
+    "name: GitHub-hosted macOS runner metadata qualification",
+    "runs-on: macos-26",
     "timeout-minutes: 5",
 ):
     if required not in qualification:
@@ -3069,7 +3028,7 @@ if normalized_workflow.count(preflight_control) != 1:
     raise SystemExit("native preflight runner controls must run once in CI")
 normalized_workflow = normalized_workflow.replace(preflight_control, "", 1)
 normalized_inputs = dict(input_blocks)
-for input_name in ("native_runner_provider", "namespace_qualification_only"):
+for input_name in ("namespace_qualification_only",):
     if dispatch.group("body").count(f"{input_name}:") != 1:
         raise SystemExit(f"workflow_dispatch must declare one {input_name} input")
     input_match = re.search(
@@ -3137,9 +3096,13 @@ for name in (ordinary_name, candidate_name):
         + block.replace(environment, "", 1)
         + normalized_workflow[end:]
     )
-if normalized_workflow.count(native_routing) != len(native_jobs):
-    raise SystemExit("declared native runner routing must select exactly four jobs")
-normalized_workflow = normalized_workflow.replace(native_routing, "runs-on: macos-26")
+# Reverse only the three approved portable runner changes before comparing the
+# original frozen coverage contract; the actual labels are asserted above.
+for job_id in ("detect-changes", "docs-validation", "macos"):
+    start, end, block = job_block(normalized_workflow, job_id)
+    normalized_workflow = (normalized_workflow[:start]
+        + block.replace("runs-on: ubuntu-24.04", "runs-on: namespace-profile-fleck", 1)
+        + normalized_workflow[end:])
 for job_id, original in full_ci_job_names.items():
     dynamic_name = diagnostic_only_name(original)
     if normalized_workflow.count(dynamic_name) != 1:

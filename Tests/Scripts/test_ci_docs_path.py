@@ -734,9 +734,7 @@ class CIDocsPathTests(unittest.TestCase):
             diagnostic,
         )
         self.assertIn(
-            "runs-on: ${{ github.event_name == 'workflow_dispatch' && "
-            "inputs.native_runner_provider == 'github-hosted' && "
-            "'macos-26' || 'namespace-profile-fleck' }}",
+            "runs-on: macos-26",
             diagnostic,
         )
         self.assertIn("timeout-minutes: 45", diagnostic)
@@ -779,11 +777,9 @@ class CIDocsPathTests(unittest.TestCase):
         self.assertIn(
             "concurrency:\n"
             "  group: ci-${{ github.event_name == 'workflow_dispatch' && "
-            "inputs.namespace_qualification_only && 'namespace-qualification-' || "
+            "inputs.namespace_qualification_only && 'runner-qualification-' || "
             "github.event_name == 'workflow_dispatch' && "
-            "inputs.ordinary_test_diagnostic_selector != '' && 'focused-' || "
-            "github.event_name == 'workflow_dispatch' && "
-            "inputs.native_runner_provider == 'namespace' && 'namespace-native-' || '' }}"
+            "inputs.ordinary_test_diagnostic_selector != '' && 'focused-' || '' }}"
             "${{ github.event.pull_request.number || github.ref }}\n"
             "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n",
             workflow,
