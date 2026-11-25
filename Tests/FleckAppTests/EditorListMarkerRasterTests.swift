@@ -490,7 +490,9 @@
   /// The run font cannot reach the marker: the same text in Avenir Next and in
   /// PingFang SC draws the same pixels in the marker column.
   @Test @MainActor func swappingTheRunFamilyLeavesTheMarkerAlone() throws {
-    let text = "• \u{4F60}\u{597D}\u{4E16}\u{754C}"
+    let body = "\u{4F60}\u{597D}\u{4E16}\u{754C}"
+    let text = "• " + body
+    let bodyRange = (text as NSString).range(of: body)
     let avenir = try #require(NSFont(name: "AvenirNext-Regular", size: 17))
     let pingfang = try #require(NSFont(name: "PingFangSC-Regular", size: 17))
     var signatures: [String] = []
@@ -498,6 +500,8 @@
       let (view, window) = rasterEditor(text, family: "Avenir Next")
       defer { closeEditorTestWindow(window) }
       setRunFont(font, paragraphAt: 0, in: view)
+      let storage = try #require(view.textStorage)
+      storage.addAttribute(.foregroundColor, value: view.backgroundColor, range: bodyRange)
       view.normalizeListMarkerFonts()
       view.setSelectedRange(
         NSRange(location: (text as NSString).length, length: 0)
@@ -505,6 +509,7 @@
       view.refreshChecklistPresentation()
       let markerFont = try #require(view.drawnListMarkerPresentations.first?.font)
       #expect(markerFont.familyName == "Avenir Next")
+      #expect(markerInk(of: view, paragraphAt: 0) > 4)
       signatures.append(markerSignature(of: view, paragraphAt: 0))
     }
     #expect(!signatures[0].isEmpty)
