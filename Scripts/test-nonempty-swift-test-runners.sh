@@ -1903,11 +1903,14 @@ FAKE_LIST_OUTPUT='FleckCoreTests.known()' \
     FLECK_TEST_APPKIT_SAMPLE_PATH="$fixture_bin/sample" \
     FLECK_TEST_APPKIT_CODESIGN_PATH="$fixture_bin/codesign" \
     FLECK_TEST_APPKIT_WATCHDOG_SECONDS=1 \
+    GITHUB_ACTIONS=true \
     FAKE_STATE="$fixture_state" \
     FAKE_LIST_OUTPUT='FleckCoreTests.known()' \
     "$fixture_scripts/run-nonempty-swift-tests.sh" \
       '^FleckCoreTests\.known\(\)$'
 assert_status 124
+/usr/bin/grep -Eq '^AppKit CI progress: elapsed=[0-9]+s host_rss_kib=([0-9]+|unavailable) output_bytes=[0-9]+$' \
+  "$fixture_state/output" || fail 'CI watchdog did not emit live host progress'
 /usr/bin/grep -Fq 'error: AppKit test host watchdog terminated the owned host' \
   "$fixture_state/output" || fail 'AppKit host watchdog did not report its timeout'
 /usr/bin/grep -Fq 'last phase: runningTests' "$fixture_state/output" ||
