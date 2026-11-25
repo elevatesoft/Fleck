@@ -704,7 +704,7 @@ jobs:
 
   pr-shadow-focus-rehearsal:
     name: Diagnostic-only / Synthetic PR focused native smoke
-    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'elevatesoft/Fleck' && github.ref == 'refs/heads/elevate/fleck-pr-shadow-rehearsal' && github.actor == 'exterminatorrat' && inputs.namespace_qualification_only }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'elevatesoft/Fleck' && github.ref == 'refs/heads/elevate/fleck-pr-shadow-product-rehearsal' && github.actor == 'exterminatorrat' && inputs.namespace_qualification_only }}
     runs-on: macos-26
     timeout-minutes: 30
     permissions:

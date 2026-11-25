@@ -266,7 +266,7 @@ class NamespaceQualificationWorkflowTest(unittest.TestCase):
             job_if(self.contents, FOCUS_REHEARSAL_JOB),
             "${{ github.event_name == 'workflow_dispatch' && "
             "github.repository == 'elevatesoft/Fleck' && "
-            "github.ref == 'refs/heads/elevate/fleck-pr-shadow-rehearsal' && "
+            "github.ref == 'refs/heads/elevate/fleck-pr-shadow-product-rehearsal' && "
             "github.actor == 'exterminatorrat' && inputs.namespace_qualification_only }}",
         )
         block = job_block(self.contents, FOCUS_REHEARSAL_JOB)

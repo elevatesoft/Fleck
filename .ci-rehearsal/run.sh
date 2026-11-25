@@ -38,7 +38,7 @@ if [[ "$mode" = native ]]; then
   [[ "$phase" = focus ]] || { printf '%s\n' 'Native parity requires a separately reviewed lane.' >&2; exit 2; }
   [[ "${GITHUB_ACTIONS:-}" = true && "${GITHUB_EVENT_NAME:-}" = workflow_dispatch &&
     "${GITHUB_REPOSITORY:-}" = elevatesoft/Fleck &&
-    "${GITHUB_REF:-}" = refs/heads/elevate/fleck-pr-shadow-rehearsal &&
+    "${GITHUB_REF:-}" = refs/heads/elevate/fleck-pr-shadow-product-rehearsal &&
     "${GITHUB_ACTOR:-}" = exterminatorrat &&
     "${GITHUB_JOB:-}" = pr-shadow-focus-rehearsal &&
     "${FLECK_SHADOW_QUALIFICATION_ONLY:-}" = true &&
@@ -127,8 +127,15 @@ PY
       fi
       # In target mode ^.+$ runs every test in the independently built target
       # bundle; evidence rejects off-target IDs. With no target it runs all.
-      bash "$source/Scripts/run-swift-tests-with-appkit-host.sh" \
-        "$source" "$root/builds/$stem" '^.+$'
+      wrapper="$source/Scripts/run-swift-tests-with-appkit-host.sh"
+      if [[ "$lane" = focused ]]; then
+        wrapper_dir="$root/wrapper-$stem"
+        /bin/mkdir -m 700 "$wrapper_dir"
+        cp "$here/product_wrapper.py" "$wrapper_dir/product_wrapper.py"
+        python3 -B "$here/product_wrapper.py" generate "$wrapper" "$wrapper_dir/appkit-host.sh"
+        wrapper="$wrapper_dir/appkit-host.sh"
+      fi
+      bash "$wrapper" "$source" "$root/builds/$stem" '^.+$'
     ) 2>&1 | tee "$root/logs/$stem.log"
     statuses=("${PIPESTATUS[@]}")
     set -e

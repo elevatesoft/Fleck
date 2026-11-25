@@ -14,11 +14,11 @@ downloading an SDK or changing global `xcode-select`.
 - **Focus:** a cold positive fixture first, then a distinct synthetic commit
   containing one reachable assertion failure on the version-2 argument. The
   pinned selector must pick the Agent Protocol target for both. Compile each
-  exactly once via the existing SwiftBuild targeted AppKit-host runner; each
+  exactly once using a hash-pinned shadow-only AppKit wrapper with the SwiftBuild synthetic test product (`--product`, not the absent PIF module target); each
   uses its own freshly checked out source and build scratch. Read canonical
   discovered IDs plus per-case markers for exact argument values. A missing
   target, unsupported SwiftBuild option, no `.xctest`, wrong IDs or log
-  format, or infra failure makes the rehearsal inconclusive or failed. Do not
+  format, unrelated test/app/bridge output, or infra failure makes the rehearsal inconclusive or failed. Do not
   silently fall back to building the full bundle.
 - **Parity:** not enabled in this native branch. `prepare --phase parity`
   stages exact same positive/reachable identities plus a separate omitted
