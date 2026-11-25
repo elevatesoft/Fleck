@@ -717,3 +717,26 @@ jobs:
           persist-credentials: false
       - name: Benchmark isolated default and two-job ordinary builds
         run: bash Scripts/benchmark-cold-ci-compile.sh
+
+  shadow-warm-compile-ab:
+    name: Shadow A/B warm vs cold Swift compilation (non-gating)
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.namespace_qualification_only && github.ref == 'refs/heads/elevate/fleck-warm-compile-5872203' }}
+    runs-on: macos-26
+    permissions:
+      contents: read
+    timeout-minutes: 45
+    steps:
+      - name: Check out exact source without credentials
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 3
+          persist-credentials: false
+      - name: Prove native sentinel and stale rejection on pinned Swift
+        env:
+          FLECK_WARM_QUALIFICATION: ${{ inputs.namespace_qualification_only }}
+        run: bash Scripts/benchmark-warm-ci-compile.sh --smoke
+      - name: Compare isolated warm and clean full test compilation
+        env:
+          FLECK_WARM_QUALIFICATION: ${{ inputs.namespace_qualification_only }}
+        run: bash Scripts/benchmark-warm-ci-compile.sh --full

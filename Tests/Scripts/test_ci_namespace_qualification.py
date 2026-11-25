@@ -255,7 +255,7 @@ class NamespaceQualificationWorkflowTest(unittest.TestCase):
 
     def test_job_inventory_preserves_existing_jobs(self):
         self.assertEqual(
-            set(self.job_ids), set(ORIGINAL_JOBS) | {QUALIFICATION_JOB, "shadow-cold-compile-ab"}
+            set(self.job_ids), set(ORIGINAL_JOBS) | {QUALIFICATION_JOB, "shadow-cold-compile-ab", "shadow-warm-compile-ab"}
         )
         self.assertEqual(len(self.job_ids), len(set(self.job_ids)))
 
@@ -270,6 +270,21 @@ class NamespaceQualificationWorkflowTest(unittest.TestCase):
         self.assertNotIn("needs:", job_block(self.contents, job))
         self.assertNotIn(job, job_block(self.contents, "macos"))
         self.assertIn("persist-credentials: false", job_block(self.contents, job))
+
+    def test_warm_compile_only_runs_on_exact_qualification_ref(self):
+        job = "shadow-warm-compile-ab"
+        self.assertEqual(job_runs_on(self.contents, job), "macos-26")
+        self.assertEqual(
+            job_if(self.contents, job),
+            "${{ github.event_name == 'workflow_dispatch' && "
+            "inputs.namespace_qualification_only && "
+            "github.ref == 'refs/heads/elevate/fleck-warm-compile-5872203' }}",
+        )
+        block = job_block(self.contents, job)
+        self.assertNotIn("needs:", block)
+        self.assertNotIn(job, job_block(self.contents, "macos"))
+        self.assertIn("persist-credentials: false", block)
+        self.assertLess(block.index("--smoke"), block.index("--full"))
 
     def test_every_original_job_skips_qualification_runs(self):
         for job_id in ORIGINAL_JOBS:

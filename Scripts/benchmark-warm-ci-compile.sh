@@ -2,13 +2,29 @@
 # Experimental runner-only benchmark. Never replaces required CI.
 set -euo pipefail
 export LANG=C LC_ALL=C
+[[ $# == 1 && ( "$1" == --smoke || "$1" == --full ) ]] || {
+  printf '%s\n' 'error: supply --smoke or --full' >&2; exit 64
+}
+readonly mode="$1"
 [[ "${GITHUB_ACTIONS:-}" == true && "${RUNNER_OS:-}" == macOS &&
    "${RUNNER_ARCH:-}" == ARM64 && "${GITHUB_EVENT_NAME:-}" == workflow_dispatch &&
+   "${GITHUB_REF:-}" == refs/heads/elevate/fleck-warm-compile-5872203 &&
+   "${FLECK_WARM_QUALIFICATION:-}" == true &&
    -n "${RUNNER_TEMP:-}" && -d "$RUNNER_TEMP" && -n "${GITHUB_SHA:-}" &&
-   "$(git rev-parse HEAD)" == "$GITHUB_SHA" && -z "$(git status --porcelain)" ]]
+   "$(git rev-parse HEAD)" == "$GITHUB_SHA" && -z "$(git status --porcelain)" ]] || {
+  printf '%s\n' 'error: warm shadow requires its exact hosted qualification dispatch' >&2; exit 64
+}
 readonly original_commit="$(git rev-parse HEAD)"
-readonly expected_seed_parent=ed06c3ce5f80d7767d0339377693765aed44bb64
-[[ "$(git rev-parse HEAD^)" == "$expected_seed_parent" ]]
+readonly expected_seed_parent=5872203975d8e01128833f28e0b38ea2cb28c658
+[[ "$(git rev-parse HEAD^)" == "$expected_seed_parent" &&
+   "$(git rev-parse HEAD~2)" == ed06c3ce5f80d7767d0339377693765aed44bb64 ]] || {
+  printf '%s\n' 'error: unexpected warm shadow source ancestry' >&2; exit 64
+}
+toolchain="$(swift --version)"
+printf '%s\n' "$toolchain"
+[[ "$toolchain" == *"Apple Swift version 6.3.3 ("* ]] || {
+  printf '%s\n' 'error: warm shadow is pinned to Apple Swift 6.3.3' >&2; exit 64
+}
 unset FLECK_ENHANCED_CANDIDATE FLECK_TEST_SWIFT_TARGET
 root="$(mktemp -d "$RUNNER_TEMP/fleck-warm-shadow.XXXXXX")"
 readonly root
@@ -19,13 +35,36 @@ check_disk() {
 }
 check_disk
 /bin/mkdir "$root/src"
-git archive "$original_commit" | /usr/bin/tar -x -C "$root/src"
+if [[ "$mode" == --full ]]; then
+  git archive "$original_commit" | /usr/bin/tar -x -C "$root/src"
+else
+  /bin/mkdir -p "$root/src/Sources/FleckCore" "$root/src/Tests/FleckCoreTests"
+  : > "$root/src/Sources/FleckCore/Note.swift"
+  cat > "$root/src/Package.swift" <<'SWIFTPM'
+// swift-tools-version: 6.0
+import PackageDescription
+let package = Package(name: "WarmShadowSmoke", targets: [
+    .target(name: "FleckCore"),
+    .testTarget(name: "FleckCoreTests", dependencies: ["FleckCore"])
+])
+SWIFTPM
+fi
 cd "$root/src"
 readonly source='Sources/FleckCore/Note.swift'
 readonly sentinel='Tests/FleckCoreTests/FleckWarmShadowSentinel.swift'
 [[ -f "$source" && ! -L "$source" && ! -e "$sentinel" ]]
-readonly lock="$(shasum -a 256 Package.resolved | awk '{print $1}')"
-printf 'warm-shadow commit=%s lock=%s\n' "$original_commit" "$lock"
+lock_state() {
+  if [[ "$mode" == --smoke ]]; then
+    [[ ! -e Package.resolved && ! -L Package.resolved ]] || return 1
+    printf '%s\n' no-dependencies
+  else
+    [[ -f Package.resolved && ! -L Package.resolved ]] || return 1
+    shasum -a 256 Package.resolved | awk '{print $1}'
+  fi
+}
+lock="$(lock_state)"
+readonly lock
+printf 'warm-shadow mode=%s commit=%s lock=%s\n' "$mode" "$original_commit" "$lock"
 sw_vers; xcodebuild -version; swift --version; xcrun --sdk macosx --show-sdk-version
 printf 'cpu=%s memory_bytes=%s initial_available_kib=%s\n' "$(sysctl -n hw.activecpu)" "$(sysctl -n hw.memsize)" "$(df_available)"
 cat >> "$source" <<'SWIFT'
@@ -112,10 +151,10 @@ check_sentinel warm changed seed fail warm.stale.negative
 if (( 10#$GITHUB_RUN_ID % 2 == 0 )); then order=(warm clean); else order=(clean warm); fi
 for arm in "${order[@]}"; do
   [[ "$(shasum -a 256 "$source" | awk '{print $1}')" == "$changed_sha" ]]
-  [[ "$(shasum -a 256 Package.resolved | awk '{print $1}')" == "$lock" ]]
+  [[ "$(lock_state)" == "$lock" ]]
   compile "$arm" "$arm.changed.compile"
   check_sentinel "$arm" changed changed pass "$arm.changed.sentinel"
   printf 'warm-shadow arm=%s scratch_kib=%s\n' "$arm" "$(du -sk "$root/$arm" | awk '{print $1}')"
 done
 [[ "$(shasum -a 256 "$source" | awk '{print $1}')" == "$changed_sha" ]]
-[[ "$(shasum -a 256 Package.resolved | awk '{print $1}')" == "$lock" ]]
+[[ "$(lock_state)" == "$lock" ]]
