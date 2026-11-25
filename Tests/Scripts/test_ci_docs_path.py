@@ -819,8 +819,8 @@ class CIDocsPathTests(unittest.TestCase):
 
     def test_workflow_schedules_full_ci_once_per_main_bound_head(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn("  pull_request:\n    branches: [main]\n", workflow)
-        self.assertIn("  merge_group:\n    types: [checks_requested]\n    branches: [main]\n", workflow)
+        self.assertIn("  pull_request:\n    branches: [elevate/fleck-queue-proof-v1]\n", workflow)
+        self.assertIn("  merge_group:\n    types: [checks_requested]\n    branches: [elevate/fleck-queue-proof-v1]\n", workflow)
         self.assertIn(
             "concurrency:\n"
             "  group: ci-${{ github.event_name == 'workflow_dispatch' && "

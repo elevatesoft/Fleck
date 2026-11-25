@@ -4,10 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    branches: [elevate/fleck-queue-proof-v1]
   merge_group:
     types: [checks_requested]
-    branches: [main]
+    branches: [elevate/fleck-queue-proof-v1]
   workflow_dispatch:
     inputs:
       own_window_capture_probe:
@@ -150,7 +150,13 @@ jobs:
         env:
           FLECK_NATIVE_CAPTURE_QA: "0"
           FLECK_TEST_APPKIT_PREFLIGHT_SELECTOR: ${{ env.FLECK_EDITOR_PREFLIGHT_SELECTOR }}
+          FLECK_QUEUE_PROOF_PHASE: ${{ github.event_name == 'merge_group' && github.event.action == 'checks_requested' && github.event.merge_group.base_ref == 'refs/heads/elevate/fleck-queue-proof-v1' && github.event.merge_group.head_sha == github.sha && github.event.merge_group.head_ref == github.ref && 'queue' || github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'elevate/fleck-queue-proof-v1' && 'admission' || 'invalid' }}
         run: |
+          case "${GITHUB_EVENT_NAME}:${FLECK_QUEUE_PROOF_PHASE}" in
+            pull_request:admission|merge_group:queue) ;;
+            *) printf '%s\n' 'Unexpected queue proof event/ref'; exit 1 ;;
+          esac
+          printf 'FLECK_QUEUE_PROOF phase=%s commit=%s tree=%s ref=%s\n' "$FLECK_QUEUE_PROOF_PHASE" "$GITHUB_SHA" "$(git rev-parse HEAD^{tree})" "$GITHUB_REF"
           unset FLECK_ENHANCED_CANDIDATE
           Scripts/run-nonempty-swift-tests.sh '^.+$'
       - name: Declare native capture boundary (ordinary graph)

@@ -2979,6 +2979,15 @@ boundary_names = (
     "Declare native capture boundary (candidate graph)",
 )
 normalized_workflow = current_workflow
+# Off-main pilot only: reverse exactly two reviewed literal pairs, once each.
+# All existing production workflow coverage, provenance and hash assertions follow.
+for pilot_only, reviewed in (
+    ("  pull_request:\n    branches: [elevate/fleck-queue-proof-v1]\n  merge_group:\n    types: [checks_requested]\n    branches: [elevate/fleck-queue-proof-v1]\n", "  pull_request:\n    branches: [main]\n  merge_group:\n    types: [checks_requested]\n    branches: [main]\n"),
+    ("      - name: Test ordinary graph\n        env:\n          FLECK_NATIVE_CAPTURE_QA: \"0\"\n          FLECK_TEST_APPKIT_PREFLIGHT_SELECTOR: ${{ env.FLECK_EDITOR_PREFLIGHT_SELECTOR }}\n          FLECK_QUEUE_PROOF_PHASE: ${{ github.event_name == 'merge_group' && github.event.action == 'checks_requested' && github.event.merge_group.base_ref == 'refs/heads/elevate/fleck-queue-proof-v1' && github.event.merge_group.head_sha == github.sha && github.event.merge_group.head_ref == github.ref && 'queue' || github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'elevate/fleck-queue-proof-v1' && 'admission' || 'invalid' }}\n        run: |\n          case \"${GITHUB_EVENT_NAME}:${FLECK_QUEUE_PROOF_PHASE}\" in\n            pull_request:admission|merge_group:queue) ;;\n            *) printf '%s\\n' 'Unexpected queue proof event/ref'; exit 1 ;;\n          esac\n          printf 'FLECK_QUEUE_PROOF phase=%s commit=%s tree=%s ref=%s\\n' \"$FLECK_QUEUE_PROOF_PHASE\" \"$GITHUB_SHA\" \"$(git rev-parse HEAD^{tree})\" \"$GITHUB_REF\"\n          unset FLECK_ENHANCED_CANDIDATE\n          Scripts/run-nonempty-swift-tests.sh '^.+$'\n", "      - name: Test ordinary graph\n        env:\n          FLECK_NATIVE_CAPTURE_QA: \"0\"\n          FLECK_TEST_APPKIT_PREFLIGHT_SELECTOR: ${{ env.FLECK_EDITOR_PREFLIGHT_SELECTOR }}\n        run: |\n          unset FLECK_ENHANCED_CANDIDATE\n          Scripts/run-nonempty-swift-tests.sh '^.+$'\n"),
+):
+    if normalized_workflow.count(pilot_only) != 1:
+        raise SystemExit("isolated queue proof workflow drift")
+    normalized_workflow = normalized_workflow.replace(pilot_only, reviewed, 1)
 # Assert the exact additive merge-queue contract before restoring the immutable baseline.
 queue_workflow_additions = (
     (
