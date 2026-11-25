@@ -480,8 +480,12 @@
           cancelledProgress = try fixture.outboxStore.load().progress.first(where: {
             $0.profileID == profileID && $0.subscriptionID == cancelledSubscriptionID
           })
+          // Closing the client completes its request before the server finishes disposal.
+          // A failed response fence blocks delivery while the outbox discard is persisted.
           if cancellationCompleted,
-            cancelledProgress?.preparedResponseFence?.disposition == .failedResponse
+            cancelledProgress?.preparedResponseFence?.disposition == .failedResponse,
+            cancelledProgress?.status == .discarded,
+            cancelledProgress?.nonDeliveryDisposition == .ownerPaused
           {
             break
           }
