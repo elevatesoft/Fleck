@@ -1213,7 +1213,7 @@ import Testing
 
 @Test @MainActor func menuPanelMarginFollowsACrossAnchorFlip() async throws {
   let screen = try #require(NSScreen.main)
-  let fixture = await CursorRoutingFixture(screen: screen)
+  let fixture = await CursorRoutingFixture(screen: screen, horizontalPlacement: 0.25)
   defer { fixture.tearDown() }
   try await fixture.activateWindow()
   let startLayout = try #require(
@@ -1232,6 +1232,13 @@ import Testing
   )
   let statusFrame = statusWindow.convertToScreen(
     fixture.statusButton.convert(fixture.statusButton.bounds, to: nil)
+  )
+  try #require(
+    MenuPanelResizeGeometry.supportsStableMinimum(
+      side: .left, frameInsets: .zero, visibleFrame: screen.visibleFrame,
+      statusLabelFrame: statusFrame
+    ),
+    "the flip destination must fit the minimum panel width on this display"
   )
   let startScreen = fixture.window.convertPoint(
     toScreen: fixture.host.convert(startPoint, to: nil)
@@ -1676,11 +1683,14 @@ private final class CursorRoutingFixture {
   init(
     screen: NSScreen,
     contentSize: CGSize = CGSize(width: 420, height: 430),
-    canResize: Bool = true
+    canResize: Bool = true,
+    horizontalPlacement: CGFloat = 0.5
   ) async {
+    let visibleFrame = screen.visibleFrame
     let frame = CGRect(
-      x: (screen.visibleFrame.midX - contentSize.width / 2).rounded(),
-      y: (screen.visibleFrame.midY - contentSize.height / 2).rounded(),
+      x: (visibleFrame.minX + (visibleFrame.width - contentSize.width) * horizontalPlacement)
+        .rounded(),
+      y: (visibleFrame.midY - contentSize.height / 2).rounded(),
       width: contentSize.width,
       height: contentSize.height
     )
