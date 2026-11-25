@@ -701,3 +701,19 @@ jobs:
           else
             printf 'rg: absent\n'
           fi
+
+  shadow-cold-compile-ab:
+    name: Shadow A/B ordinary cold compilation (non-gating)
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/elevate/fleck-cold-compile-ab-c487495' }}
+    runs-on: macos-26
+    permissions:
+      contents: read
+    timeout-minutes: 45
+    steps:
+      - name: Check out exact source without credentials
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Benchmark isolated default and two-job ordinary builds
+        run: bash Scripts/benchmark-cold-ci-compile.sh

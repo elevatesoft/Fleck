@@ -255,9 +255,21 @@ class NamespaceQualificationWorkflowTest(unittest.TestCase):
 
     def test_job_inventory_preserves_existing_jobs(self):
         self.assertEqual(
-            set(self.job_ids), set(ORIGINAL_JOBS) | {QUALIFICATION_JOB}
+            set(self.job_ids), set(ORIGINAL_JOBS) | {QUALIFICATION_JOB, "shadow-cold-compile-ab"}
         )
         self.assertEqual(len(self.job_ids), len(set(self.job_ids)))
+
+    def test_shadow_compile_job_is_not_a_required_check_or_other_ref(self):
+        job = "shadow-cold-compile-ab"
+        self.assertEqual(job_runs_on(self.contents, job), "macos-26")
+        self.assertEqual(
+            job_if(self.contents, job),
+            "${{ github.event_name == 'workflow_dispatch' && "
+            "github.ref == 'refs/heads/elevate/fleck-cold-compile-ab-c487495' }}",
+        )
+        self.assertNotIn("needs:", job_block(self.contents, job))
+        self.assertNotIn(job, job_block(self.contents, "macos"))
+        self.assertIn("persist-credentials: false", job_block(self.contents, job))
 
     def test_every_original_job_skips_qualification_runs(self):
         for job_id in ORIGINAL_JOBS:
