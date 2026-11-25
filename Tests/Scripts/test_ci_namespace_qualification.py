@@ -19,6 +19,7 @@ ORIGINAL_JOBS = (
     "ordinary-test-diagnostic",
 )
 QUALIFICATION_JOB = "namespace-qualification"
+FRESH_AB_JOBS = {"fresh-ab-seed", "fresh-ab-cold", "fresh-ab-restore"}
 
 FULL_CI_JOBS = (
     "detect-changes",
@@ -255,9 +256,37 @@ class NamespaceQualificationWorkflowTest(unittest.TestCase):
 
     def test_job_inventory_preserves_existing_jobs(self):
         self.assertEqual(
-            set(self.job_ids), set(ORIGINAL_JOBS) | {QUALIFICATION_JOB}
+            set(self.job_ids), set(ORIGINAL_JOBS) | {QUALIFICATION_JOB} | FRESH_AB_JOBS
         )
         self.assertEqual(len(self.job_ids), len(set(self.job_ids)))
+
+    def test_fresh_cache_ab_is_exactly_guarded_and_never_a_required_lane(self):
+        for job in FRESH_AB_JOBS:
+            condition = job_if(self.contents, job)
+            for term in ("github.event_name == 'workflow_dispatch'",
+                         "github.repository == 'elevatesoft/Fleck'",
+                         "github.ref == 'refs/heads/elevate/fleck-ci-fresh-ab-v1'",
+                         "github.actor == 'exterminatorrat'",
+                         "github.triggering_actor == 'exterminatorrat'",
+                         "github.run_attempt == 1", "inputs.namespace_qualification_only",
+                         "inputs.fresh_ab_admission != ''"):
+                self.assertIn(term, condition)
+            self.assertEqual(job_runs_on(self.contents, job), "macos-26")
+            self.assertTrue(job_name(self.contents, job).startswith("Diagnostic-only / "))
+        seed = job_block(self.contents, "fresh-ab-seed")
+        cold = job_block(self.contents, "fresh-ab-cold")
+        restore = job_block(self.contents, "fresh-ab-restore")
+        self.assertEqual(seed.count("actions/cache/save@"), 1)
+        self.assertIn("before-save seed", seed)
+        self.assertIn("steps.allow-save.outputs.allow == 'true'", seed)
+        self.assertNotIn("actions/cache", cold)
+        self.assertEqual(restore.count("actions/cache/restore@"), 1)
+        self.assertNotIn("actions/cache/save", restore)
+        self.assertNotIn("restore-keys", restore)
+        self.assertIn("fail-on-cache-miss: true", restore)
+        self.assertIn("verify-restore restore", restore)
+        for job in ORIGINAL_JOBS:
+            self.assertTrue(all(j not in job_block(self.contents, job) for j in FRESH_AB_JOBS))
 
     def test_every_original_job_skips_qualification_runs(self):
         for job_id in ORIGINAL_JOBS:
