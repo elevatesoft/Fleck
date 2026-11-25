@@ -32,7 +32,7 @@ bundle identifier, application icon, and primary visual identity.
 ## Current-tree standalone brand assets
 
 The repository's MPL grant does not apply to these standalone brand assets and
-branded product captures:
+branded product imagery:
 
 - `docs/design/references/fleck-website-approved-direction-2026-08-01.png`
 - `Assets/fleck-mark.png`
