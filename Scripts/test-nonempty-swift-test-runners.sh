@@ -2979,6 +2979,84 @@ boundary_names = (
     "Declare native capture boundary (candidate graph)",
 )
 normalized_workflow = current_workflow
+# Assert the exact additive merge-queue contract before restoring the immutable baseline.
+queue_workflow_additions = (
+    (
+        '    branches: [main]\n'
+        '  merge_group:\n'
+        '    types: [checks_requested]\n'
+        '    branches: [main]\n'
+        '  workflow_dispatch:\n',
+        '    branches: [main]\n'
+        '  workflow_dispatch:\n',
+    ),
+    (
+        '      ENHANCED_RESULT: ${{ needs.macos-enhanced.result }}\n'
+        '      ENHANCED_COMMIT: ${{ needs.macos-enhanced.outputs.source_commit }}\n'
+        '      ENHANCED_TREE: ${{ needs.macos-enhanced.outputs.source_tree }}\n'
+        '      ENHANCED_VERSION: ${{ needs.macos-enhanced.outputs.product_version }}\n'
+        '      INITIAL_COMMIT: ${{ needs.macos-build.outputs.source_commit }}\n',
+        '      ENHANCED_RESULT: ${{ needs.macos-enhanced.result }}\n'
+        '      INITIAL_COMMIT: ${{ needs.macos-build.outputs.source_commit }}\n',
+    ),
+    (
+        '          test "${#DETECTED_WORKFLOW_SHA256}" -eq 64\n'
+        '          if [[ "${GITHUB_EVENT_NAME:-}" == merge_group ]]; then\n'
+        '            test "$ROUTE" = full\n'
+        '            test "$ENHANCED_COMMIT" = "$DETECTED_COMMIT"\n'
+        '            test "$ENHANCED_TREE" = "$DETECTED_TREE"\n'
+        '            test "$ENHANCED_VERSION" = "$DETECTED_VERSION"\n'
+        '          fi\n'
+        '          case "$ROUTE" in\n',
+        '          test "${#DETECTED_WORKFLOW_SHA256}" -eq 64\n'
+        '          case "$ROUTE" in\n',
+    ),
+    (
+        '    timeout-minutes: 90\n'
+        '    outputs:\n'
+        '      source_commit: ${{ steps.queue-source.outputs.source_commit }}\n'
+        '      source_tree: ${{ steps.queue-source.outputs.source_tree }}\n'
+        '      product_version: ${{ steps.queue-source.outputs.product_version }}\n'
+        '    env:\n',
+        '    timeout-minutes: 90\n'
+        '    env:\n',
+    ),
+    (
+        '        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd\n'
+        '      - name: Verify queued Enhanced checkout\n'
+        "        if: ${{ github.event_name == 'merge_group' }}\n"
+        '        run: |\n'
+        '          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"\n'
+        '          test -z "$(git status --porcelain)"\n'
+        '      - name: Toolchain\n',
+        '        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd\n'
+        '      - name: Toolchain\n',
+    ),
+    (
+        '\n'
+        '      - name: Verify Enhanced coverage source remained pinned\n'
+        '        id: queue-source\n'
+        "        if: ${{ github.event_name == 'merge_group' }}\n"
+        '        run: |\n'
+        '          set -euo pipefail\n'
+        '          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"\n'
+        '          test -z "$(git status --porcelain)"\n'
+        '          {\n'
+        '            printf \'source_commit=%s\\n\' "$(git rev-parse HEAD)"\n'
+        '            printf \'source_tree=%s\\n\' "$(git rev-parse HEAD^{tree})"\n'
+        '            printf \'product_version=%s\\n\' "$(cat VERSION)"\n'
+        '          } >> "$GITHUB_OUTPUT"\n'
+        '\n'
+        '  own-window-capture-probe:\n',
+        '\n'
+        '  own-window-capture-probe:\n',
+    ),
+)
+for queued_block, baseline_block in queue_workflow_additions:
+    if normalized_workflow.count(queued_block) != 1:
+        raise SystemExit("CI merge-queue addition is missing, moved, or duplicated")
+    normalized_workflow = normalized_workflow.replace(queued_block, baseline_block, 1)
+
 preflight_environment = re.search(
     r"^env:\n  FLECK_EDITOR_PREFLIGHT_SELECTOR: '([^']+)'\n\n",
     current_workflow, re.M,
