@@ -3778,16 +3778,32 @@ func toolbarFontSizeNativePromptAndEditLifecycle(width: Double) async throws {
   @MainActor
   func finishEditing(_ field: NSTextField) async throws {
     if width == 380 {
-      let more = try #require(fontPickerAccessibilityElement(host, label: "More formatting"))
+      // Transfer the key window from the font-size popover before sampling pointer geometry.
       window.makeKeyAndOrderFront(nil)
-      try sendHostedAccessibilityPress(more, to: window)
+      await settleHostedView(host)
+      try #require(window.isKeyWindow)
+
+      func clickMore() throws {
+        let more = try #require(fontPickerAccessibilityElement(host, label: "More formatting"))
+        let frame = try #require((more.value(forKey: "accessibilityFrame") as? NSValue)?.rectValue)
+        try #require(!frame.isEmpty && !frame.isInfinite)
+        try sendHostedAccessibilityPress(
+          more, to: window, frame: frame, timestamp: ProcessInfo.processInfo.systemUptime
+        )
+      }
+
+      // The owner handoff must not itself dismiss the actual field under test.
+      let presentedWindow = try #require(field.window)
+      try #require(presentedWindow !== window)
+      try #require(presentedWindow.isVisible && !field.isHiddenOrHasHiddenAncestor)
+      try #require(visibleHostedTextFields(
+        label: "Font size", as: NSTextField.self, owner: window
+      ).contains { $0 === field })
+      try clickMore()
       await settleHostedView(host)
       #expect(visibleHostedTextFields(label: "Font size", as: NSTextField.self, owner: window).isEmpty)
       if visibleAccessibilityElement(label: "Font Size", owner: window) != nil {
-        let expandedMore = try #require(
-          fontPickerAccessibilityElement(host, label: "More formatting")
-        )
-        try sendHostedAccessibilityPress(expandedMore, to: window)
+        try clickMore()
         await settleHostedView(host)
       }
     } else {
@@ -7278,8 +7294,13 @@ private func sendHostedClick(
 }
 
 @MainActor
-private func sendHostedAccessibilityPress(_ element: NSObject, to window: NSWindow) throws {
-  let frame = try #require(element.value(forKey: "accessibilityFrame") as? NSValue).rectValue
+private func sendHostedAccessibilityPress(
+  _ element: NSObject, to window: NSWindow, frame sampledFrame: CGRect? = nil,
+  timestamp: TimeInterval = 0
+) throws {
+  let frame = try sampledFrame ?? #require(
+    (element.value(forKey: "accessibilityFrame") as? NSValue)?.rectValue
+  )
   let location = window.convertPoint(
     fromScreen: CGPoint(x: frame.midX, y: frame.midY)
   )
@@ -7289,7 +7310,7 @@ private func sendHostedAccessibilityPress(_ element: NSObject, to window: NSWind
         with: eventType,
         location: location,
         modifierFlags: [],
-        timestamp: 0,
+        timestamp: timestamp,
         windowNumber: window.windowNumber,
         context: nil,
         eventNumber: 0,
