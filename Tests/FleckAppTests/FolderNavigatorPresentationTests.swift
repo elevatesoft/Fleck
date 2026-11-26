@@ -442,6 +442,17 @@ struct FolderNavigatorPresentationTests {
 
   @Test
   func folderRenameDuplicateErrorPersistsAfterInFlightSelectionSaveCompletes() async throws {
+    try await assertDuplicateRenameFocusDuringSelectionSave(injectRefocusRefusal: false)
+  }
+
+  @Test
+  func folderRenameRecoversFromOneFalseAffirmativeNativeRefocus() async throws {
+    try await assertDuplicateRenameFocusDuringSelectionSave(injectRefocusRefusal: true)
+  }
+
+  private func assertDuplicateRenameFocusDuringSelectionSave(
+    injectRefocusRefusal: Bool
+  ) async throws {
     let saveGate = FolderNavigatorSelectionSaveGate()
     let fixture = try await FolderNavigatorFixture(
       width: 520,
@@ -449,7 +460,8 @@ struct FolderNavigatorPresentationTests {
       saveOperation: { workspace, _, _, _ in
         await saveGate.holdIfSelectionMatches(workspace.selectedNoteID)
         return .committed
-      }
+      },
+      useRefocusRefusalWindow: injectRefocusRefusal
     )
     defer { fixture.close() }
     defer { Task { await saveGate.release() } }
@@ -485,6 +497,14 @@ struct FolderNavigatorPresentationTests {
     let duplicateEditor = try #require(renameField.currentEditor() as? NSTextView)
     try #require(duplicateEditor === fixture.window.firstResponder)
     #expect(duplicateEditor.string == "Personal")
+    let refusalWindow = fixture.window as? FolderRefocusRefusalWindow
+    if injectRefocusRefusal {
+      let refusalWindow = try #require(refusalWindow)
+      refusalWindow.refuseOnceIf = { [weak state = fixture.state] field in
+        field.accessibilityIdentifier() == renameIdentifier && field.currentEditor() == nil
+          && state?.saveError?.hasPrefix("Could not update folder:") == true
+      }
+    }
     try fixture.click(fixture.element(identifier: "folder-unfiled"))
 
     let renameReady = try await fixture.waitForRenameEditor(
@@ -509,6 +529,7 @@ struct FolderNavigatorPresentationTests {
           + " responder=\(fixture.window.firstResponder.map { String(describing: type(of: $0)) } ?? "nil")"
       )
     }
+    if injectRefocusRefusal { try #require(refusalWindow?.refusalCount == 1) }
     try #require(renameReady)
     try #require(fixture.state.saveError?.hasPrefix("Could not update folder:") == true)
     #expect(fixture.state.workspace.folders.first?.name == "Work")
@@ -1637,6 +1658,21 @@ private final class FolderNavigatorNativeDiagnostics: NSObject, NSTextFieldDeleg
 }
 
 @MainActor
+private final class FolderRefocusRefusalWindow: NSWindow {
+  var refuseOnceIf: ((NSTextField) -> Bool)?
+  private(set) var refusalCount = 0
+
+  override func makeFirstResponder(_ responder: NSResponder?) -> Bool {
+    if isKeyWindow, let field = responder as? NSTextField, refuseOnceIf?(field) == true {
+      refuseOnceIf = nil
+      refusalCount += 1
+      return true
+    }
+    return super.makeFirstResponder(responder)
+  }
+}
+
+@MainActor
 private final class FolderNavigatorFixture {
   private static var nextMouseEventNumber = 1
   private var closeTask: Task<Void, Never>?
@@ -1651,7 +1687,8 @@ private final class FolderNavigatorFixture {
     width: CGFloat,
     names: [String] = ["Work", "Personal"],
     persistsWorkspace: Bool = false,
-    saveOperation: AppState.SaveOperation? = nil
+    saveOperation: AppState.SaveOperation? = nil,
+    useRefocusRefusalWindow: Bool = false
   ) async throws {
     NSApplication.shared.accessibilitySetValue(
       true,
@@ -1688,10 +1725,16 @@ private final class FolderNavigatorFixture {
           .frame(maxWidth: .infinity, maxHeight: .infinity)
       )
     )
-    window = NSWindow(
-      contentRect: NSRect(x: -10_000, y: -10_000, width: width, height: 430),
-      styleMask: [.titled, .resizable], backing: .buffered, defer: false
-    )
+    let frame = NSRect(x: -10_000, y: -10_000, width: width, height: 430)
+    if useRefocusRefusalWindow {
+      window = FolderRefocusRefusalWindow(
+        contentRect: frame, styleMask: [.titled, .resizable], backing: .buffered, defer: false
+      )
+    } else {
+      window = NSWindow(
+        contentRect: frame, styleMask: [.titled, .resizable], backing: .buffered, defer: false
+      )
+    }
     window.isReleasedWhenClosed = false
     window.contentView = host
     window.makeKeyAndOrderFront(nil)

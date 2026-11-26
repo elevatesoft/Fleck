@@ -3211,6 +3211,7 @@
         field.onOwnershipChange = { [weak coordinator = context.coordinator] ownsEditor in
           coordinator?.setEditingOwnership(ownsEditor)
         }
+        context.coordinator.focusRequest = focusRequest
         context.coordinator.requestFocus(for: field)
         return field
       }
@@ -3223,6 +3224,7 @@
         if context.coordinator.focusRequest != focusRequest {
           context.coordinator.focusRequest = focusRequest
           context.coordinator.hasFocused = false
+          context.coordinator.isRecoveryRequest = true
         }
         if (field.currentEditor() as? NSTextView)?.hasMarkedText() != true,
           field.stringValue != text
@@ -3275,6 +3277,7 @@
         var onCancel: () -> Void
         var isActive = true
         var hasFocused = false
+        var isRecoveryRequest = false
         var focusRequest: UInt64 = 0
         var focusGeneration: UInt64 = 0
 
@@ -3295,8 +3298,31 @@
           focusGeneration &+= 1
           let generation = focusGeneration
           DispatchQueue.main.async {
-            guard self.isActive, self.focusGeneration == generation, field.window != nil else { return }
-            self.hasFocused = field.window?.makeFirstResponder(field) == true
+            guard self.isActive, self.focusGeneration == generation, let window = field.window
+            else { return }
+            let activated = window.makeFirstResponder(field)
+            guard self.isRecoveryRequest else {
+              self.hasFocused = activated
+              field.reportOwnershipAfterResponderTransition()
+              return
+            }
+            // Consume the explicit recovery request even when AppKit accepts it without
+            // installing the field editor. Later view updates must not reopen it.
+            self.hasFocused = true
+            self.isRecoveryRequest = false
+            let editor = field.currentEditor()
+            if editor == nil || window.firstResponder !== editor {
+              let fallbackResponder = window.firstResponder
+              DispatchQueue.main.async { [weak window, weak fallbackResponder] in
+                guard self.isActive, self.focusGeneration == generation,
+                  let window, window.isKeyWindow, field.window === window,
+                  !field.isHiddenOrHasHiddenAncestor,
+                  window.firstResponder === fallbackResponder
+                else { return }
+                _ = window.makeFirstResponder(field)
+                field.reportOwnershipAfterResponderTransition()
+              }
+            }
             field.reportOwnershipAfterResponderTransition()
           }
         }
