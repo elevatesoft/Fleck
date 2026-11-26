@@ -173,8 +173,8 @@ def input_block(contents, input_id):
     return contents[match.start() : end]
 
 
-README_171_RUNNER = "${{ github.event_name == 'pull_request' && github.event.pull_request.number == 171 && 'macos-26' || 'blacksmith-6vcpu-macos-26' }}"
-README_171_COMMENT = '    # Keep the README PR on GitHub-hosted macOS without changing the default runner.\n'
+README_171_RUNNER = "${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 171 || (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.before == '65eb2fe831a66b251c1d74d680a72e357192198b')) && 'macos-26' || 'blacksmith-6vcpu-macos-26' }}"
+README_171_COMMENT = '    # Use GitHub macOS for README #171 and its exact first main push only.\n'
 README_171_JOBS = ("macos-build", "macos-validation", "macos-enhanced")
 
 
@@ -209,27 +209,39 @@ class NamespaceQualificationWorkflowTest(unittest.TestCase):
         for job in README_171_JOBS:
             self.assertEqual(job_runs_on(self.raw_contents, job), README_171_RUNNER)
         route = re.fullmatch(
-            r"\$\{\{ github\.event_name == '([^']+)' && github\.event\.pull_request\.number == (\d+)"
+            r"\$\{\{ \(github\.event_name == '([^']+)' && github\.event\.pull_request\.number == (\d+)"
+            r" \|\| \(github\.event_name == '([^']+)' && github\.ref == '([^']+)'"
+            r" && github\.event\.before == '([a-f0-9]{40})'\)\)"
             r" && '([^']+)' \|\| '([^']+)' \}\}",
             README_171_RUNNER,
         )
         self.assertIsNotNone(route)
-        event, number, yes, fallback = route.groups()
-        for actual_event, actual_pr, want in (
-            ("pull_request", 171, "macos-26"),
-            ("pull_request", 170, BLACKSMITH_RUNS_ON),
-            ("pull_request", 172, BLACKSMITH_RUNS_ON),
-            ("push", None, BLACKSMITH_RUNS_ON),
-            ("merge_group", None, BLACKSMITH_RUNS_ON),
-            ("workflow_dispatch", None, BLACKSMITH_RUNS_ON),
+        event, number, first_push, ref, before, yes, fallback = route.groups()
+        exact_base = "65eb2fe831a66b251c1d74d680a72e357192198b"
+        for actual_event, actual_pr, actual_ref, actual_before, want in (
+            ("pull_request", 171, "refs/pull/171/merge", None, "macos-26"),
+            ("pull_request", 170, "refs/pull/170/merge", None, BLACKSMITH_RUNS_ON),
+            ("pull_request", 172, "refs/pull/172/merge", None, BLACKSMITH_RUNS_ON),
+            ("push", None, "refs/heads/main", exact_base, "macos-26"),
+            ("push", None, "refs/heads/main", "0" * 40, BLACKSMITH_RUNS_ON),
+            ("push", None, "refs/heads/main", "1" * 40, BLACKSMITH_RUNS_ON),
+            ("push", None, "refs/heads/other", exact_base, BLACKSMITH_RUNS_ON),
+            ("merge_group", 171, "refs/heads/main", exact_base, BLACKSMITH_RUNS_ON),
+            ("workflow_dispatch", 171, "refs/heads/main", exact_base, BLACKSMITH_RUNS_ON),
         ):
-            with self.subTest(event=actual_event, pr=actual_pr):
-                self.assertEqual(yes if (actual_event, actual_pr) == (event, int(number)) else fallback, want)
+            with self.subTest(event=actual_event, pr=actual_pr, ref=actual_ref, before=actual_before):
+                admitted = (actual_event, actual_pr) == (event, int(number)) or (
+                    actual_event, actual_ref, actual_before
+                ) == (first_push, ref, before)
+                self.assertEqual(yes if admitted else fallback, want)
 
     def test_runner_override_drift_fails_closed(self):
         label = f"    runs-on: {README_171_RUNNER}\n"
         for bad in (
             self.raw_contents.replace("number == 171", "number == 172", 1),
+            self.raw_contents.replace("65eb2fe831a66b251c1d74d680a72e357192198b", "0" * 40, 1),
+            self.raw_contents.replace("'refs/heads/main'", "'refs/heads/other'", 1),
+            self.raw_contents.replace("== 'push'", "== 'merge_group'", 1),
             self.raw_contents.replace("'macos-26' || 'blacksmith-", "'blacksmith-6vcpu-macos-26' || 'blacksmith-", 1),
             self.raw_contents.replace(label, "    runs-on: macos-26\n", 1),
             self.raw_contents.replace("    runs-on: macos-26\n", label, 1),

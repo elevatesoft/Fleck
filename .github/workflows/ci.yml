@@ -96,8 +96,8 @@ jobs:
     name: ${{ (github.event_name == 'workflow_dispatch' && (inputs.namespace_qualification_only || inputs.ordinary_test_diagnostic_selector != '')) && 'Diagnostic-only / macOS ordinary graph and package' || 'macOS ordinary graph and package' }}
     needs: detect-changes
     if: ${{ !inputs.namespace_qualification_only && needs.detect-changes.result == 'success' && needs.detect-changes.outputs.route == 'full' }}
-    # Keep the README PR on GitHub-hosted macOS without changing the default runner.
-    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 171 && 'macos-26' || 'blacksmith-6vcpu-macos-26' }}
+    # Use GitHub macOS for README #171 and its exact first main push only.
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 171 || (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.before == '65eb2fe831a66b251c1d74d680a72e357192198b')) && 'macos-26' || 'blacksmith-6vcpu-macos-26' }}
     timeout-minutes: 90
     outputs:
       source_commit: ${{ steps.source.outputs.commit }}
@@ -214,7 +214,7 @@ jobs:
     name: ${{ (github.event_name == 'workflow_dispatch' && (inputs.namespace_qualification_only || inputs.ordinary_test_diagnostic_selector != '')) && 'Diagnostic-only / macOS ordinary repeat and bundle validation' || 'macOS ordinary repeat and bundle validation' }}
     needs: detect-changes
     if: ${{ !inputs.namespace_qualification_only && needs.detect-changes.result == 'success' && needs.detect-changes.outputs.route == 'full' }}
-    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 171 && 'macos-26' || 'blacksmith-6vcpu-macos-26' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 171 || (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.before == '65eb2fe831a66b251c1d74d680a72e357192198b')) && 'macos-26' || 'blacksmith-6vcpu-macos-26' }}
     timeout-minutes: 90
     outputs:
       source_commit: ${{ steps.source.outputs.commit }}
@@ -418,7 +418,7 @@ jobs:
     name: ${{ (github.event_name == 'workflow_dispatch' && (inputs.namespace_qualification_only || inputs.ordinary_test_diagnostic_selector != '')) && 'Diagnostic-only / macOS Enhanced Local candidate gates' || 'macOS Enhanced Local candidate gates' }}
     needs: detect-changes
     if: ${{ !inputs.namespace_qualification_only && needs.detect-changes.result == 'success' && needs.detect-changes.outputs.route == 'full' }}
-    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 171 && 'macos-26' || 'blacksmith-6vcpu-macos-26' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 171 || (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.before == '65eb2fe831a66b251c1d74d680a72e357192198b')) && 'macos-26' || 'blacksmith-6vcpu-macos-26' }}
     timeout-minutes: 90
     outputs:
       source_commit: ${{ steps.queue-source.outputs.source_commit }}

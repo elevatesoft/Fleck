@@ -2696,8 +2696,8 @@ import sys
 
 root = pathlib.Path(sys.argv[1]).resolve()
 workflow_path = root / ".github/workflows/ci.yml"
-README_171_RUNNER = "${{ github.event_name == 'pull_request' && github.event.pull_request.number == 171 && 'macos-26' || 'blacksmith-6vcpu-macos-26' }}"
-README_171_COMMENT = '    # Keep the README PR on GitHub-hosted macOS without changing the default runner.\n'
+README_171_RUNNER = "${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 171 || (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.before == '65eb2fe831a66b251c1d74d680a72e357192198b')) && 'macos-26' || 'blacksmith-6vcpu-macos-26' }}"
+README_171_COMMENT = '    # Use GitHub macOS for README #171 and its exact first main push only.\n'
 README_171_JOBS = ("macos-build", "macos-validation", "macos-enhanced")
 
 
