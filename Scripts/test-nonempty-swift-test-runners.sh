@@ -2704,6 +2704,15 @@ native_jobs = (
     "macos-build", "macos-validation", "macos-enhanced", "ordinary-test-diagnostic",
 )
 native_routing = "runs-on: macos-26"
+blacksmith_runner = "blacksmith-6vcpu-macos-26"
+blacksmith_jobs = ("macos-build", "macos-validation")
+if (current_workflow.count("blacksmith-") != len(blacksmith_jobs)
+        or current_workflow.count(f"    runs-on: {blacksmith_runner}\n") != len(blacksmith_jobs)):
+    raise SystemExit("CI must contain only its two approved Blacksmith runner labels")
+for sibling in workflow_path.parent.iterdir():
+    if sibling != workflow_path and sibling.suffix in {".yml", ".yaml"}:
+        if "blacksmith-" in sibling.read_text():
+            raise SystemExit("Blacksmith runner labels are not allowed in sibling workflows")
 full_ci_job_names = {
     "detect-changes": "Detect documentation-only changes",
     "macos-build": "macOS ordinary graph and package",
@@ -2845,14 +2854,14 @@ for job_id, block, required_values in (
         (
             diagnostic_only_name("macOS ordinary graph and package"),
             "needs: detect-changes",
-            full_graph_condition, native_routing, "timeout-minutes: 90",
+            full_graph_condition, f"runs-on: {blacksmith_runner}", "timeout-minutes: 90",
             "python3 -B -m unittest discover -s Tests/Scripts -p test_ci_docs_path.py",
         ),
     ),
     (
         "macos-validation", validation,
         (
-            "needs: detect-changes", full_graph_condition, native_routing,
+            "needs: detect-changes", full_graph_condition, f"runs-on: {blacksmith_runner}",
             "timeout-minutes: 90",
             'FLECK_NATIVE_CAPTURE_QA: "0"', "unset FLECK_ENHANCED_CANDIDATE FLECK_APP",
             "bash Tests/Scripts/validate-macos-no-launch.test.sh", "Scripts/validate-macos.sh",
@@ -2913,12 +2922,17 @@ for job_id in job_ids:
     condition = re.search(r"^    if: (.+)$", block, re.M)
     if condition is None:
         raise SystemExit(f"CI job {job_id} has no dispatch condition")
-    runner = re.search(r"^    runs-on: (.+)$", block, re.M)
-    if runner is None:
-        raise SystemExit(f"CI job {job_id} has no runner selection")
-    expected_runner = "ubuntu-24.04" if job_id in ("detect-changes", "docs-validation", "macos") else "macos-26"
-    if runner.group(1) != expected_runner:
-        raise SystemExit(f"CI job {job_id} must use standard GitHub-hosted {expected_runner}")
+    runners = re.findall(r"^    runs-on: (.+)$", block, re.M)
+    if len(runners) != 1:
+        raise SystemExit(f"CI job {job_id} must have exactly one runner selection")
+    if job_id in ("detect-changes", "docs-validation", "macos"):
+        expected_runner = "ubuntu-24.04"
+    elif job_id in blacksmith_jobs:
+        expected_runner = blacksmith_runner
+    else:
+        expected_runner = "macos-26"
+    if runners[0] != expected_runner:
+        raise SystemExit(f"CI job {job_id} must use {expected_runner}")
     if job_id == qualification_job:
         if condition.group(1) != (
             "${{ github.event_name == 'workflow_dispatch' && "
@@ -3099,12 +3113,20 @@ for name in (ordinary_name, candidate_name):
         + block.replace(environment, "", 1)
         + normalized_workflow[end:]
     )
-# Reverse only the three approved portable runner changes before comparing the
+# Reverse only the approved portable and Blacksmith runner changes before comparing the
 # original frozen coverage contract; the actual labels are asserted above.
 for job_id in ("detect-changes", "docs-validation", "macos"):
     start, end, block = job_block(normalized_workflow, job_id)
     normalized_workflow = (normalized_workflow[:start]
         + block.replace("runs-on: ubuntu-24.04", "runs-on: namespace-profile-fleck", 1)
+        + normalized_workflow[end:])
+for job_id in blacksmith_jobs:
+    start, end, block = job_block(normalized_workflow, job_id)
+    label = f"    runs-on: {blacksmith_runner}\n"
+    if block.count(label) != 1:
+        raise SystemExit(f"CI {job_id} must contain its exact Blacksmith runner once")
+    normalized_workflow = (normalized_workflow[:start]
+        + block.replace(label, "    runs-on: macos-26\n", 1)
         + normalized_workflow[end:])
 for job_id, original in full_ci_job_names.items():
     dynamic_name = diagnostic_only_name(original)
