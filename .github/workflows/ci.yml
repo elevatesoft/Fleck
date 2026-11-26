@@ -417,7 +417,7 @@ jobs:
     name: ${{ (github.event_name == 'workflow_dispatch' && (inputs.namespace_qualification_only || inputs.ordinary_test_diagnostic_selector != '')) && 'Diagnostic-only / macOS Enhanced Local candidate gates' || 'macOS Enhanced Local candidate gates' }}
     needs: detect-changes
     if: ${{ !inputs.namespace_qualification_only && needs.detect-changes.result == 'success' && needs.detect-changes.outputs.route == 'full' }}
-    runs-on: macos-26
+    runs-on: blacksmith-6vcpu-macos-26
     timeout-minutes: 90
     outputs:
       source_commit: ${{ steps.queue-source.outputs.source_commit }}
@@ -459,7 +459,7 @@ jobs:
       - name: Declare native capture boundary (candidate graph)
         if: always()
         run: |
-          message='Strict native screenshot/pixel capture: NOT RUN in GitHub-hosted CI (FLECK_NATIVE_CAPTURE_QA=0).
+          message='Strict native screenshot/pixel capture: NOT RUN in hosted CI (FLECK_NATIVE_CAPTURE_QA=0).
           The strict case requires separate native-QA artifact and status-receipt evidence.
           Passing CI does not prove this case ran; this workflow does not claim full native screenshot coverage.
           All other full-graph selectors and assertions remain enabled.'

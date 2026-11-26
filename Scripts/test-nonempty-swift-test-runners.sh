@@ -2705,7 +2705,7 @@ native_jobs = (
 )
 native_routing = "runs-on: macos-26"
 blacksmith_runner = "blacksmith-6vcpu-macos-26"
-blacksmith_jobs = ("macos-build", "macos-validation")
+blacksmith_jobs = ("macos-build", "macos-validation", "macos-enhanced")
 if (current_workflow.count("blacksmith-") != len(blacksmith_jobs)
         or current_workflow.count(f"    runs-on: {blacksmith_runner}\n") != len(blacksmith_jobs)):
     raise SystemExit("CI must contain only its two approved Blacksmith runner labels")
@@ -3198,14 +3198,16 @@ for job_id in ("detect-changes", "docs-validation", "macos"):
     normalized_workflow = (normalized_workflow[:start]
         + block.replace("runs-on: ubuntu-24.04", "runs-on: namespace-profile-fleck", 1)
         + normalized_workflow[end:])
+_, _, enhanced_current = job_block(current_workflow, "macos-enhanced")
+if enhanced_current.count("NOT RUN in hosted CI (FLECK_NATIVE_CAPTURE_QA=0).") != 1:
+    raise SystemExit("Enhanced CI must declare its native-capture boundary")
 for job_id in blacksmith_jobs:
     start, end, block = job_block(normalized_workflow, job_id)
     label = f"    runs-on: {blacksmith_runner}\n"
     if block.count(label) != 1:
         raise SystemExit(f"CI {job_id} must contain its exact Blacksmith runner once")
-    normalized_workflow = (normalized_workflow[:start]
-        + block.replace(label, "    runs-on: macos-26\n", 1)
-        + normalized_workflow[end:])
+    block = block.replace(label, "    runs-on: macos-26\n", 1)
+    normalized_workflow = normalized_workflow[:start] + block + normalized_workflow[end:]
 for job_id, original in full_ci_job_names.items():
     dynamic_name = diagnostic_only_name(original)
     if normalized_workflow.count(dynamic_name) != 1:
