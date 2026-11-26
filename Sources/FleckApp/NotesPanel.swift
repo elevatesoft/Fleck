@@ -3399,7 +3399,8 @@
       let isDisclosurePainted = frozenUnfiledDisclosure ?? showsUnfiledDisclosure
       return HStack(spacing: 0) {
         Button {
-          focusedRow = .unfiled
+          // Keep selection independent of a native rename still resolving its blur.
+          if editingFolderID == nil { focusedRow = .unfiled }
           onSelect(nil)
         } label: {
           rowLabel(
@@ -3480,7 +3481,7 @@
         )
       } else {
         Button {
-          focusedRow = .folder(folder.id)
+          if editingFolderID == nil { focusedRow = .folder(folder.id) }
           onSelect(folder.id)
         } label: {
           rowLabel(

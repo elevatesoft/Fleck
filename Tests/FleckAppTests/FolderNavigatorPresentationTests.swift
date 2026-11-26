@@ -201,6 +201,27 @@ struct FolderNavigatorPresentationTests {
     #expect(source.contains("try appState.renameFolder(id: editingFolderID, name: folderNameDraft)"))
   }
 
+  @Test func folderSelectionDoesNotTakeExplicitFocusFromUnresolvedRename() throws {
+    let source = try folderNavigatorSource()
+    let unfiled = try #require(
+      source.components(separatedBy: "private var rootRow:").last?
+        .components(separatedBy: "private func folderRow(").first
+    )
+    let folder = try #require(
+      source.components(separatedBy: "private func folderRow(").last?
+        .components(separatedBy: "private func folderEditor(").first
+    )
+    for (row, focus, select) in [
+      (unfiled, ".unfiled", "onSelect(nil)"),
+      (folder, ".folder(folder.id)", "onSelect(folder.id)"),
+    ] {
+      #expect(row.contains("if editingFolderID == nil { focusedRow = \(focus) }\n          \(select)"))
+      #expect(row.components(separatedBy: "focusedRow = \(focus)").count == 2)
+      #expect(row.contains(".focusable()"))
+      #expect(row.contains(".focused($focusedRow, equals: \(focus))"))
+    }
+  }
+
   @Test func folderCreationClearsItsValidationErrorThroughTheCreateKey() throws {
     let source = try folderNavigatorSource()
     let commit = try #require(
