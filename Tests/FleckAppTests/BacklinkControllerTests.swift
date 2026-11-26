@@ -15,14 +15,17 @@ import Testing
     await gate.build(notes)
   })
 
-  controller.refresh(liveNotes: [firstSnapshot])
+  let firstRefresh = controller.refresh(liveNotes: [firstSnapshot])
   await gate.waitUntilStarted(for: firstSnapshot.id)
-  controller.refresh(liveNotes: [secondSnapshot])
+  let secondRefresh = controller.refresh(liveNotes: [secondSnapshot])
   await gate.waitUntilStarted(for: secondSnapshot.id)
   await gate.complete(secondSnapshot.id, with: secondIndex)
-  await gate.complete(firstSnapshot.id, with: firstIndex)
-  await yieldToMainActor()
+  await secondRefresh.value
+  #expect(controller.index == secondIndex)
 
+  // Deliver the older result only after the newer result has published.
+  await gate.complete(firstSnapshot.id, with: firstIndex)
+  await firstRefresh.value
   #expect(controller.index == secondIndex)
 }
 
