@@ -179,7 +179,13 @@ struct FolderNavigatorPresentationTests {
     #expect(editor.contains("accessibilityIdentifier: accessibilityIdentifier"))
     #expect(source.contains("field.isBezeled = false"))
     #expect(source.contains("field.focusRingType = .none"))
-    #expect(source.contains("field.window?.makeFirstResponder(field)"))
+    let focus = try #require(
+      source.components(separatedBy: "func requestFocus(for field:").last?
+        .components(separatedBy: "func controlTextDidChange(").first
+    )
+    #expect(focus.contains("let window = field.window"))
+    #expect(focus.contains("window.makeFirstResponder(field)"))
+    #expect(focus.contains("field.reportOwnershipAfterResponderTransition()"))
     #expect(!editor.contains(".fleckNeutralControlOutline("))
     #expect(!editor.contains("Button(\"Save\")"))
     #expect(!editor.contains("Button(\"Cancel\""))
