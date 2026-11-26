@@ -3775,13 +3775,35 @@ func toolbarFontSizeNativePromptAndEditLifecycle(width: Double) async throws {
     return field
   }
 
+  var narrowDismissalStage = 0
+
   @MainActor
   func finishEditing(_ field: NSTextField) async throws {
     if width == 380 {
+      narrowDismissalStage += 1
+      let beforeWindow = field.window
+      let wasEditing = field.currentEditor() != nil
       let more = try #require(fontPickerAccessibilityElement(host, label: "More formatting"))
       window.makeKeyAndOrderFront(nil)
+      let frame = (more.value(forKey: "accessibilityFrame") as? NSValue)?.rectValue
+      let freshMore = fontPickerAccessibilityElement(host, label: "More formatting")
+      let freshFrame = (freshMore?.value(forKey: "accessibilityFrame") as? NSValue)?.rectValue
+      let frameInsideOwner = frame.map { window.frame.contains($0) } ?? false
+      let framesEqual = frame != nil && frame == freshFrame
+      let ownerHit = frame.flatMap { rect -> NSView? in
+        guard let content = window.contentView else { return nil }
+        let point = window.convertPoint(fromScreen: CGPoint(x: rect.midX, y: rect.midY))
+        return content.hitTest(content.convert(point, from: nil))
+      }
+      let clickTargetInOwner = ownerHit?.window === window
+      let originalFieldHadFocus = beforeWindow?.firstResponder === field.currentEditor()
+        && field.currentEditor() != nil
+      let overflowWasVisible = visibleAccessibilityElement(label: "Font Size", owner: window) != nil
       try sendHostedAccessibilityPress(more, to: window)
       await settleHostedView(host)
+      let remaining = visibleHostedTextFields(label: "Font size", as: NSTextField.self, owner: window)
+      let overflowVisible = visibleAccessibilityElement(label: "Font Size", owner: window) != nil
+      print("FLECK_FONT_SIZE_DISMISS stage=\(narrowDismissalStage) freshAXFound=\(freshMore != nil) freshFrameFound=\(freshFrame != nil) framesEqual=\(framesEqual) clickTargetInOwner=\(clickTargetInOwner) originalFieldHadFocus=\(originalFieldHadFocus) geometryInOwner=\(frameInsideOwner) ownerKey=\(window.isKeyWindow) wasEditing=\(wasEditing) candidateCount=\(remaining.count) sameField=\(remaining.contains { $0 === field }) originalOwner=\(beforeWindow != nil && field.window === beforeWindow) originalWindowVisible=\(beforeWindow?.isVisible == true) originalFieldHidden=\(field.isHiddenOrHasHiddenAncestor) fieldEditing=\(field.currentEditor() != nil) overflowWasVisible=\(overflowWasVisible) overflowVisible=\(overflowVisible)")
       #expect(visibleHostedTextFields(label: "Font size", as: NSTextField.self, owner: window).isEmpty)
       if visibleAccessibilityElement(label: "Font Size", owner: window) != nil {
         let expandedMore = try #require(
