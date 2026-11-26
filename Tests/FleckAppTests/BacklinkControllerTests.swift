@@ -39,17 +39,17 @@ import Testing
     await gate.build(notes)
   })
 
-  controller.refresh(liveNotes: [publishedSnapshot])
+  let publishedRefresh = controller.refresh(liveNotes: [publishedSnapshot])
   await gate.waitUntilStarted(for: publishedSnapshot.id)
   await gate.complete(publishedSnapshot.id, with: publishedIndex)
-  await yieldToMainActor()
+  await publishedRefresh.value
   #expect(controller.index == publishedIndex)
 
-  controller.refresh(liveNotes: [blockedSnapshot])
+  let blockedRefresh = controller.refresh(liveNotes: [blockedSnapshot])
   await gate.waitUntilStarted(for: blockedSnapshot.id)
   controller.cancel()
   await gate.complete(blockedSnapshot.id, with: blockedIndex)
-  await yieldToMainActor()
+  await blockedRefresh.value
 
   #expect(controller.index == publishedIndex)
 }
@@ -75,13 +75,6 @@ import Testing
   }
 
   #expect(published == [linkedIndex, linkedIndex, emptyIndex])
-}
-
-@MainActor
-private func yieldToMainActor() async {
-  for _ in 0..<4 {
-    await Task.yield()
-  }
 }
 
 private func makeBacklinkIndex(sourceID: UUID) -> BacklinkIndex {
