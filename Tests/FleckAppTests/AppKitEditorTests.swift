@@ -3775,13 +3775,26 @@ func toolbarFontSizeNativePromptAndEditLifecycle(width: Double) async throws {
     return field
   }
 
+  var narrowDismissalStage = 0
+
   @MainActor
   func finishEditing(_ field: NSTextField) async throws {
     if width == 380 {
+      narrowDismissalStage += 1
+      let beforeWindow = field.window
+      let wasEditing = field.currentEditor() != nil
       let more = try #require(fontPickerAccessibilityElement(host, label: "More formatting"))
       window.makeKeyAndOrderFront(nil)
+      let frame = (more.value(forKey: "accessibilityFrame") as? NSValue)?.rectValue
+      let freshMore = fontPickerAccessibilityElement(host, label: "More formatting")
+      let freshFrame = (freshMore?.value(forKey: "accessibilityFrame") as? NSValue)?.rectValue
+      let frameInsideOwner = frame.map { window.frame.contains($0) } ?? false
+      let framesEqual = frame != nil && frame == freshFrame
       try sendHostedAccessibilityPress(more, to: window)
       await settleHostedView(host)
+      let remaining = visibleHostedTextFields(label: "Font size", as: NSTextField.self, owner: window)
+      let overflowVisible = visibleAccessibilityElement(label: "Font Size", owner: window) != nil
+      print("FLECK_FONT_SIZE_DISMISS stage=\(narrowDismissalStage) freshAXFound=\(freshMore != nil) freshFrameFound=\(freshFrame != nil) framesEqual=\(framesEqual) geometryInOwner=\(frameInsideOwner) ownerKey=\(window.isKeyWindow) wasEditing=\(wasEditing) candidateCount=\(remaining.count) sameField=\(remaining.contains { $0 === field }) originalOwner=\(beforeWindow != nil && field.window === beforeWindow) originalWindowVisible=\(beforeWindow?.isVisible == true) originalFieldHidden=\(field.isHiddenOrHasHiddenAncestor) fieldEditing=\(field.currentEditor() != nil) overflowVisible=\(overflowVisible)")
       #expect(visibleHostedTextFields(label: "Font size", as: NSTextField.self, owner: window).isEmpty)
       if visibleAccessibilityElement(label: "Font Size", owner: window) != nil {
         let expandedMore = try #require(
