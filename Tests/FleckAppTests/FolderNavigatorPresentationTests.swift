@@ -511,11 +511,23 @@ struct FolderNavigatorPresentationTests {
           && state?.saveError?.hasPrefix("Could not update folder:") == true
       }
     }
+    #if DEBUG
+    FolderRenameFocusTrace.begin()
+    defer { FolderRenameFocusTrace.end() }
+    FolderRenameFocusTrace.record("fixture.before-pointer")
+    #endif
     try fixture.click(fixture.element(identifier: "folder-unfiled"))
+    #if DEBUG
+    FolderRenameFocusTrace.record("fixture.pointer-return")
+    #endif
 
     let renameReady = try await fixture.waitForRenameEditor(
       folderID: folder.id, reportingValidationError: true
     )
+    #if DEBUG
+    FolderRenameFocusTrace.record("fixture.rename-ready=\(renameReady)")
+    FolderRenameFocusTrace.report()
+    #endif
     if !renameReady {
       let fields = fixture.textFields.filter { $0.accessibilityIdentifier() == renameIdentifier }
       let field = fields.first
