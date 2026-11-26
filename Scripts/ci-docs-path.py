@@ -175,6 +175,19 @@ def classify(repository, event_name, event_path, source_commit):
             route = classify_pull_request(repository, source_commit, event)
         except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValidationError):
             route = "full"
+    elif event_name == "merge_group":
+        try:
+            event = json.loads(Path(event_path).read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValidationError("could not read merge group event") from error
+        group = event.get("merge_group") if isinstance(event, dict) else None
+        if (
+            not isinstance(group, dict)
+            or event.get("action") != "checks_requested"
+            or group.get("head_sha") != source_commit
+        ):
+            raise ValidationError("merge group event does not match the checked-out head")
+        # Queue acceptance must exercise full coverage even for a documentation-only PR.
     return route, identity
 
 

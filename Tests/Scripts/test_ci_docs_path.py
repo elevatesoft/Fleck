@@ -163,6 +163,9 @@ class CIDocsPathTests(unittest.TestCase):
                 "INITIAL_RESULT": "skipped" if docs else "success",
                 "VALIDATION_RESULT": "skipped" if docs else "success",
                 "ENHANCED_RESULT": "skipped" if docs else "success",
+                "ENHANCED_COMMIT": "" if docs else identity["source_commit"],
+                "ENHANCED_TREE": "" if docs else identity["source_tree"],
+                "ENHANCED_VERSION": "" if docs else identity["product_version"],
                 "INITIAL_COMMIT": "" if docs else identity["source_commit"],
                 "VALIDATION_COMMIT": "" if docs else identity["source_commit"],
                 "INITIAL_TREE": "" if docs else identity["source_tree"],
@@ -204,6 +207,49 @@ class CIDocsPathTests(unittest.TestCase):
         route, identity = fixture.classify()
         self.assertEqual(route, "full")
         self.assertEqual(self.gate(identity, route).returncode, 0)
+
+    def test_merge_group_docs_are_full_and_all_native_evidence_is_required(self):
+        fixture = self.fixture()
+        _, sha = fixture.merge(changes={"README.md": "# Fleck\n\nQueue docs update.\n"})
+        self.assertEqual(fixture.classify()[0], "docs")
+        fixture.event_path.write_text(json.dumps({
+            "action": "checks_requested", "merge_group": {"head_sha": sha}
+        }), encoding="utf-8")
+        route, identity = fixture.classify("merge_group")
+        self.assertEqual(route, "full")
+        group = {"GITHUB_EVENT_NAME": "merge_group"}
+        self.assertEqual(self.gate(identity, route, **group).returncode, 0)
+        self.assertNotEqual(self.gate(identity, "docs", **group).returncode, 0)
+        for lane in ("INITIAL", "VALIDATION", "ENHANCED"):
+            for key, bad in (
+                ("RESULT", ""), ("RESULT", "failure"), ("RESULT", "skipped"),
+                ("COMMIT", ""), ("COMMIT", "0" * 40), ("TREE", ""),
+                ("TREE", "1" * 40), ("VERSION", ""), ("VERSION", "0.0.1"),
+            ):
+                with self.subTest(lane=lane, key=key, bad=bad):
+                    overrides = {**group, f"{lane}_{key}": bad}
+                    self.assertNotEqual(self.gate(identity, route, **overrides).returncode, 0)
+        self.assertEqual(
+            self.gate(identity, route, GITHUB_EVENT_NAME="pull_request", ENHANCED_COMMIT="").returncode,
+            0,
+        )
+
+    def test_merge_group_event_rejects_missing_wrong_or_malformed_head(self):
+        fixture = self.fixture()
+        _, sha = fixture.merge(changes={"README.md": "# Fleck\n\nQueue docs update.\n"})
+        for payload in (
+            [], {},
+            {"action": "checks_requested", "merge_group": {}},
+            {"action": "checks_requested", "merge_group": {"head_sha": "0" * 40}},
+            {"action": "destroyed", "merge_group": {"head_sha": sha}},
+        ):
+            with self.subTest(payload=payload):
+                fixture.event_path.write_text(json.dumps(payload), encoding="utf-8")
+                with self.assertRaises(CI_DOCS_PATH.ValidationError):
+                    fixture.classify("merge_group")
+        fixture.event_path.write_text("{malformed", encoding="utf-8")
+        with self.assertRaises(CI_DOCS_PATH.ValidationError):
+            fixture.classify("merge_group")
 
     def test_c_mixed_readme_and_source_change_uses_full_gate(self):
         fixture = self.fixture()
@@ -774,6 +820,7 @@ class CIDocsPathTests(unittest.TestCase):
     def test_workflow_schedules_full_ci_once_per_main_bound_head(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("  pull_request:\n    branches: [main]\n", workflow)
+        self.assertIn("  merge_group:\n    types: [checks_requested]\n    branches: [main]\n", workflow)
         self.assertIn(
             "concurrency:\n"
             "  group: ci-${{ github.event_name == 'workflow_dispatch' && "

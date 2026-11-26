@@ -50,7 +50,7 @@ EXPECTED_RUNS_ON = {
     "macos-validation": BLACKSMITH_RUNS_ON,
     "docs-validation": "ubuntu-24.04",
     "macos": "ubuntu-24.04",
-    "macos-enhanced": NATIVE_PROVIDER_RUNS_ON,
+    "macos-enhanced": BLACKSMITH_RUNS_ON,
     "own-window-capture-probe": "macos-26",
     "folder-navigator-diagnostic": "macos-26",
     "folder-navigator-diagnostic-enhanced": "macos-26",
@@ -200,8 +200,8 @@ class NamespaceQualificationWorkflowTest(unittest.TestCase):
                 allowed = {"ubuntu-24.04", "macos-26"}
                 if workflow == WORKFLOW:
                     allowed.add(BLACKSMITH_RUNS_ON)
-                    self.assertEqual(runners.count(BLACKSMITH_RUNS_ON), 2)
-                    self.assertEqual(contents.count("blacksmith-"), 2)
+                    self.assertEqual(runners.count(BLACKSMITH_RUNS_ON), 3)
+                    self.assertEqual(contents.count("blacksmith-"), 3)
                 else:
                     self.assertNotIn("blacksmith-", contents)
                 self.assertLessEqual(set(runners), allowed)
