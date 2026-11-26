@@ -43,13 +43,14 @@ NORMAL_JOB_NAMES = {
 }
 
 NATIVE_PROVIDER_RUNS_ON = "macos-26"
+BLACKSMITH_RUNS_ON = "blacksmith-6vcpu-macos-26"
 EXPECTED_RUNS_ON = {
     "detect-changes": "ubuntu-24.04",
-    "macos-build": NATIVE_PROVIDER_RUNS_ON,
-    "macos-validation": NATIVE_PROVIDER_RUNS_ON,
+    "macos-build": BLACKSMITH_RUNS_ON,
+    "macos-validation": BLACKSMITH_RUNS_ON,
     "docs-validation": "ubuntu-24.04",
     "macos": "ubuntu-24.04",
-    "macos-enhanced": NATIVE_PROVIDER_RUNS_ON,
+    "macos-enhanced": BLACKSMITH_RUNS_ON,
     "own-window-capture-probe": "macos-26",
     "folder-navigator-diagnostic": "macos-26",
     "folder-navigator-diagnostic-enhanced": "macos-26",
@@ -191,12 +192,19 @@ class NamespaceQualificationWorkflowTest(unittest.TestCase):
         self.assertIn("default: false", block)
 
     def test_all_workflow_jobs_use_standard_hosted_runners(self):
-        for workflow in WORKFLOW.parent.glob("*.yml"):
+        for workflow in sorted((*WORKFLOW.parent.glob("*.yml"), *WORKFLOW.parent.glob("*.yaml"))):
             contents = workflow.read_text()
             with self.subTest(workflow=workflow.name):
                 runners = re.findall(r"^    runs-on: (.+)$", contents, re.M)
                 self.assertTrue(runners)
-                self.assertLessEqual(set(runners), {"ubuntu-24.04", "macos-26"})
+                allowed = {"ubuntu-24.04", "macos-26"}
+                if workflow == WORKFLOW:
+                    allowed.add(BLACKSMITH_RUNS_ON)
+                    self.assertEqual(runners.count(BLACKSMITH_RUNS_ON), 3)
+                    self.assertEqual(contents.count("blacksmith-"), 3)
+                else:
+                    self.assertNotIn("blacksmith-", contents)
+                self.assertLessEqual(set(runners), allowed)
                 self.assertNotIn("native_runner_provider", contents)
 
     def test_all_other_runs_on_values_are_unchanged(self):
