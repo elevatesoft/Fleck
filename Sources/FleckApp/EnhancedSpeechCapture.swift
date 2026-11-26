@@ -349,12 +349,12 @@
           )
         }
       }
-      candidate.watchdogTask = Task { @MainActor [weak self, candidate, startupNow, startupSleeper] in
+      candidate.watchdogTask = Task { @MainActor [weak self, weak candidate, startupNow, startupSleeper] in
         let remaining = startupNow().duration(to: startupDeadline)
         if remaining > .zero {
           await startupSleeper(remaining)
         }
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, let candidate else { return }
         self?.recordFailure(
           candidate,
           error: EnhancedSpeechCaptureError.startupTimedOut,

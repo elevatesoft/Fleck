@@ -5350,6 +5350,8 @@ func EnhancedSpeechCancellationDoesNotDowngradeTheInstalledRuntime() async throw
 
 @Test @MainActor func EnhancedSpeechCancellationDuringLoadReleasesInferenceExactlyOnce() async {
   let loadGate = Gate()
+  let sleeperGate = Gate()
+  let startupInstant = ContinuousClock().now
   let lifetime = EnhancedLifetimeTracker()
   var inference: EnhancedInferenceSpy? = EnhancedInferenceSpy(lifetime: lifetime)
   inference?.loadGate = loadGate
@@ -5359,12 +5361,15 @@ func EnhancedSpeechCancellationDoesNotDowngradeTheInstalledRuntime() async throw
       .ready(repositoryURL: URL(fileURLWithPath: "/verified/parakeet"))
     },
     makeInference: { [weak inference] in inference! },
-    makeAudio: { _ in EnhancedAudioSpy(samples: []) }
+    makeAudio: { _ in EnhancedAudioSpy(samples: []) },
+    startupNow: { startupInstant },
+    startupSleeper: { _ in await sleeperGate.wait() }
   )
   let start = Task {
     try await capture.start(provisional: { _ in }, level: { _ in })
   }
   await loadGate.waitUntilWaiting()
+  await sleeperGate.waitUntilWaiting()
   inference = nil
 
   await capture.cancel()
@@ -5372,9 +5377,11 @@ func EnhancedSpeechCancellationDoesNotDowngradeTheInstalledRuntime() async throw
 
   #expect(lifetime.cancelCount == 1)
   #expect(lifetime.releaseCount == 1)
+  // The sleeper deliberately ignores cancellation and is still suspended here.
   #expect(lifetime.deinitCount == 1)
   #expect(weakInference == nil)
   #expect(!capture.hasActiveResources)
+  await sleeperGate.openGate()
 }
 
 @Test @MainActor func EnhancedSpeechCancellationCleansResourcesReturnedByLateFluidLoad() async {
