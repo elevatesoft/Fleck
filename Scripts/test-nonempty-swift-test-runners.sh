@@ -2696,7 +2696,26 @@ import sys
 
 root = pathlib.Path(sys.argv[1]).resolve()
 workflow_path = root / ".github/workflows/ci.yml"
-current_workflow = workflow_path.read_text()
+README_171_RUNNER = "${{ github.event_name == 'pull_request' && github.event.pull_request.number == 171 && 'macos-26' || 'blacksmith-6vcpu-macos-26' }}"
+README_171_COMMENT = '    # Keep the README PR on GitHub-hosted macOS without changing the default runner.\n'
+README_171_JOBS = ("macos-build", "macos-validation", "macos-enhanced")
+
+
+def normalize_readme_171_runner(contents):
+    label = f"    runs-on: {README_171_RUNNER}\n"
+    if contents.count(label) != len(README_171_JOBS) or contents.count(README_171_COMMENT) != 1:
+        raise AssertionError("README 171 runner override changed")
+    for job in README_171_JOBS:
+        pattern = rf"(^  {re.escape(job)}:\n)(.*?)(?=^  [a-z0-9-]+:\n|\Z)"
+        match = re.search(pattern, contents, re.M | re.S)
+        if match is None or match[2].count(label) != 1:
+            raise AssertionError(f"README 171 runner override must appear exactly once in {job}")
+    return contents.replace(README_171_COMMENT, "", 1).replace(
+        label, "    runs-on: blacksmith-6vcpu-macos-26\n"
+    )
+
+
+current_workflow = normalize_readme_171_runner(workflow_path.read_text())
 
 qualification_guard = "!inputs.namespace_qualification_only"
 qualification_job = "namespace-qualification"

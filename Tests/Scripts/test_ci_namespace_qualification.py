@@ -173,10 +173,30 @@ def input_block(contents, input_id):
     return contents[match.start() : end]
 
 
+README_171_RUNNER = "${{ github.event_name == 'pull_request' && github.event.pull_request.number == 171 && 'macos-26' || 'blacksmith-6vcpu-macos-26' }}"
+README_171_COMMENT = '    # Keep the README PR on GitHub-hosted macOS without changing the default runner.\n'
+README_171_JOBS = ("macos-build", "macos-validation", "macos-enhanced")
+
+
+def normalize_readme_171_runner(contents):
+    label = f"    runs-on: {README_171_RUNNER}\n"
+    if contents.count(label) != len(README_171_JOBS) or contents.count(README_171_COMMENT) != 1:
+        raise AssertionError("README 171 runner override changed")
+    for job in README_171_JOBS:
+        pattern = rf"(^  {re.escape(job)}:\n)(.*?)(?=^  [a-z0-9-]+:\n|\Z)"
+        match = re.search(pattern, contents, re.M | re.S)
+        if match is None or match[2].count(label) != 1:
+            raise AssertionError(f"README 171 runner override must appear exactly once in {job}")
+    return contents.replace(README_171_COMMENT, "", 1).replace(
+        label, "    runs-on: blacksmith-6vcpu-macos-26\n"
+    )
+
+
 class NamespaceQualificationWorkflowTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.contents = WORKFLOW.read_text(encoding="utf-8")
+        cls.raw_contents = WORKFLOW.read_text(encoding="utf-8")
+        cls.contents = normalize_readme_171_runner(cls.raw_contents)
         jobs = re.search(r"^jobs:\n", cls.contents, re.M)
         if jobs is None:
             raise AssertionError("missing jobs section")
@@ -184,6 +204,38 @@ class NamespaceQualificationWorkflowTest(unittest.TestCase):
             r"^  ([a-z0-9-]+):\n", cls.contents[jobs.end() :], re.M
         )
         cls.qualification = job_block(cls.contents, QUALIFICATION_JOB)
+
+    def test_exact_readme_171_scope_and_fallback(self):
+        for job in README_171_JOBS:
+            self.assertEqual(job_runs_on(self.raw_contents, job), README_171_RUNNER)
+        route = re.fullmatch(
+            r"\$\{\{ github\.event_name == '([^']+)' && github\.event\.pull_request\.number == (\d+)"
+            r" && '([^']+)' \|\| '([^']+)' \}\}",
+            README_171_RUNNER,
+        )
+        self.assertIsNotNone(route)
+        event, number, yes, fallback = route.groups()
+        for actual_event, actual_pr, want in (
+            ("pull_request", 171, "macos-26"),
+            ("pull_request", 170, BLACKSMITH_RUNS_ON),
+            ("pull_request", 172, BLACKSMITH_RUNS_ON),
+            ("push", None, BLACKSMITH_RUNS_ON),
+            ("merge_group", None, BLACKSMITH_RUNS_ON),
+            ("workflow_dispatch", None, BLACKSMITH_RUNS_ON),
+        ):
+            with self.subTest(event=actual_event, pr=actual_pr):
+                self.assertEqual(yes if (actual_event, actual_pr) == (event, int(number)) else fallback, want)
+
+    def test_runner_override_drift_fails_closed(self):
+        label = f"    runs-on: {README_171_RUNNER}\n"
+        for bad in (
+            self.raw_contents.replace("number == 171", "number == 172", 1),
+            self.raw_contents.replace("'macos-26' || 'blacksmith-", "'blacksmith-6vcpu-macos-26' || 'blacksmith-", 1),
+            self.raw_contents.replace(label, "    runs-on: macos-26\n", 1),
+            self.raw_contents.replace("    runs-on: macos-26\n", label, 1),
+        ):
+            with self.assertRaises(AssertionError):
+                normalize_readme_171_runner(bad)
 
     def test_dispatch_input_is_boolean_default_false(self):
         block = input_block(self.contents, "namespace_qualification_only")
@@ -193,7 +245,7 @@ class NamespaceQualificationWorkflowTest(unittest.TestCase):
 
     def test_all_workflow_jobs_use_standard_hosted_runners(self):
         for workflow in sorted((*WORKFLOW.parent.glob("*.yml"), *WORKFLOW.parent.glob("*.yaml"))):
-            contents = workflow.read_text()
+            contents = self.contents if workflow == WORKFLOW else workflow.read_text()
             with self.subTest(workflow=workflow.name):
                 runners = re.findall(r"^    runs-on: (.+)$", contents, re.M)
                 self.assertTrue(runners)
