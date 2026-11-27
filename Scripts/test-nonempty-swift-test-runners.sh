@@ -1903,11 +1903,14 @@ FAKE_LIST_OUTPUT='FleckCoreTests.known()' \
     FLECK_TEST_APPKIT_SAMPLE_PATH="$fixture_bin/sample" \
     FLECK_TEST_APPKIT_CODESIGN_PATH="$fixture_bin/codesign" \
     FLECK_TEST_APPKIT_WATCHDOG_SECONDS=1 \
+    GITHUB_ACTIONS=true \
     FAKE_STATE="$fixture_state" \
     FAKE_LIST_OUTPUT='FleckCoreTests.known()' \
     "$fixture_scripts/run-nonempty-swift-tests.sh" \
       '^FleckCoreTests\.known\(\)$'
 assert_status 124
+/usr/bin/grep -Eq '^AppKit CI progress: elapsed=[0-9]+s host_rss_kib=([0-9]+|unavailable) output_bytes=[0-9]+$' \
+  "$fixture_state/output" || fail 'CI watchdog did not emit live host progress'
 /usr/bin/grep -Fq 'error: AppKit test host watchdog terminated the owned host' \
   "$fixture_state/output" || fail 'AppKit host watchdog did not report its timeout'
 /usr/bin/grep -Fq 'last phase: runningTests' "$fixture_state/output" ||
@@ -2700,11 +2703,16 @@ qualification_job = "namespace-qualification"
 native_jobs = (
     "macos-build", "macos-validation", "macos-enhanced", "ordinary-test-diagnostic",
 )
-native_routing = (
-    "runs-on: ${{ github.event_name == 'workflow_dispatch' && "
-    "inputs.native_runner_provider == 'github-hosted' && "
-    "'macos-26' || 'namespace-profile-fleck' }}"
-)
+native_routing = "runs-on: macos-26"
+blacksmith_runner = "blacksmith-6vcpu-macos-26"
+blacksmith_jobs = ("macos-build", "macos-validation", "macos-enhanced")
+if (current_workflow.count("blacksmith-") != len(blacksmith_jobs)
+        or current_workflow.count(f"    runs-on: {blacksmith_runner}\n") != len(blacksmith_jobs)):
+    raise SystemExit("CI must contain only its two approved Blacksmith runner labels")
+for sibling in workflow_path.parent.iterdir():
+    if sibling != workflow_path and sibling.suffix in {".yml", ".yaml"}:
+        if "blacksmith-" in sibling.read_text():
+            raise SystemExit("Blacksmith runner labels are not allowed in sibling workflows")
 full_ci_job_names = {
     "detect-changes": "Detect documentation-only changes",
     "macos-build": "macOS ordinary graph and package",
@@ -2737,11 +2745,9 @@ aggregate_condition = (
 )
 qualified_concurrency = (
     "  group: ci-${{ github.event_name == 'workflow_dispatch' && "
-    "inputs.namespace_qualification_only && 'namespace-qualification-' || "
+    "inputs.namespace_qualification_only && 'runner-qualification-' || "
     "github.event_name == 'workflow_dispatch' && "
-    "inputs.ordinary_test_diagnostic_selector != '' && 'focused-' || "
-    "github.event_name == 'workflow_dispatch' && "
-    "inputs.native_runner_provider == 'namespace' && 'namespace-native-' || '' }}"
+    "inputs.ordinary_test_diagnostic_selector != '' && 'focused-' || '' }}"
     "${{ github.event.pull_request.number || github.ref }}"
 )
 prior_concurrency = (
@@ -2781,39 +2787,6 @@ for input_name in ("folder_navigator_probe", "folder_navigator_recording"):
         if required not in input_block:
             raise SystemExit(f"{input_name} input omitted: {required}")
     input_blocks[input_name] = input_block
-
-provider_match = re.search(
-    r"^      native_runner_provider:\n(?:^ {8}.*\n)+", current_workflow, re.M
-)
-if provider_match is None:
-    raise SystemExit("native_runner_provider input is missing")
-provider_block = provider_match.group(0)
-if current_workflow.count(provider_block) != 1:
-    raise SystemExit("native_runner_provider input must occur exactly once")
-for required in ("required: false", "type: choice", "default: namespace"):
-    if required not in provider_block:
-        raise SystemExit(f"native_runner_provider input omitted: {required}")
-if re.findall(r"^          - (\S+)$", provider_block, re.M) != [
-    "github-hosted",
-    "namespace",
-]:
-    raise SystemExit(
-        "native_runner_provider must offer exactly GitHub-hosted and manual namespace"
-    )
-if (
-    native_routing.count("'macos-26'") != 1
-    or native_routing.count("'namespace-profile-fleck'") != 1
-    or native_routing.count("inputs.native_runner_provider == 'github-hosted'") != 1
-    or native_routing.find("github.event_name == 'workflow_dispatch'")
-    > native_routing.find("inputs.native_runner_provider == 'github-hosted'")
-    or native_routing.find("inputs.native_runner_provider == 'github-hosted'")
-    > native_routing.find("'macos-26'")
-    or not native_routing.endswith("'macos-26' || 'namespace-profile-fleck' }}")
-):
-    raise SystemExit(
-        "native runner routing must default to Namespace and keep GitHub-hosted "
-        "an explicit manual dispatch opt-in"
-    )
 
 supplemental_jobs = (
     (
@@ -2881,14 +2854,14 @@ for job_id, block, required_values in (
         (
             diagnostic_only_name("macOS ordinary graph and package"),
             "needs: detect-changes",
-            full_graph_condition, native_routing, "timeout-minutes: 90",
+            full_graph_condition, f"runs-on: {blacksmith_runner}", "timeout-minutes: 90",
             "python3 -B -m unittest discover -s Tests/Scripts -p test_ci_docs_path.py",
         ),
     ),
     (
         "macos-validation", validation,
         (
-            "needs: detect-changes", full_graph_condition, native_routing,
+            "needs: detect-changes", full_graph_condition, f"runs-on: {blacksmith_runner}",
             "timeout-minutes: 90",
             'FLECK_NATIVE_CAPTURE_QA: "0"', "unset FLECK_ENHANCED_CANDIDATE FLECK_APP",
             "bash Tests/Scripts/validate-macos-no-launch.test.sh", "Scripts/validate-macos.sh",
@@ -2901,7 +2874,7 @@ for job_id, block, required_values in (
             diagnostic_only_name("macOS build and tests"),
             aggregate_condition,
             "needs: [detect-changes, docs-validation, macos-build, macos-validation, macos-enhanced]",
-            "runs-on: namespace-profile-fleck",
+            "runs-on: ubuntu-24.04",
         ),
     ),
 ):
@@ -2944,19 +2917,22 @@ job_ids = re.findall(
     r"^  ([a-z0-9-]+):\n", current_workflow[jobs_section.end():], re.M
 )
 existing_jobs = tuple(job_id for job_id in job_ids if job_id != qualification_job)
-native_expression = native_routing.removeprefix("runs-on: ")
 for job_id in job_ids:
     _, _, block = job_block(current_workflow, job_id)
     condition = re.search(r"^    if: (.+)$", block, re.M)
     if condition is None:
         raise SystemExit(f"CI job {job_id} has no dispatch condition")
-    runner = re.search(r"^    runs-on: (.+)$", block, re.M)
-    if runner is None:
-        raise SystemExit(f"CI job {job_id} has no runner selection")
-    if (runner.group(1) == native_expression) != (job_id in native_jobs):
-        raise SystemExit(
-            f"CI job {job_id} must be one of the four manual Namespace provider jobs"
-        )
+    runners = re.findall(r"^    runs-on: (.+)$", block, re.M)
+    if len(runners) != 1:
+        raise SystemExit(f"CI job {job_id} must have exactly one runner selection")
+    if job_id in ("detect-changes", "docs-validation", "macos"):
+        expected_runner = "ubuntu-24.04"
+    elif job_id in blacksmith_jobs:
+        expected_runner = blacksmith_runner
+    else:
+        expected_runner = "macos-26"
+    if runners[0] != expected_runner:
+        raise SystemExit(f"CI job {job_id} must use {expected_runner}")
     if job_id == qualification_job:
         if condition.group(1) != (
             "${{ github.event_name == 'workflow_dispatch' && "
@@ -2968,8 +2944,8 @@ for job_id in job_ids:
 
 qualification = job_block(current_workflow, qualification_job)[2]
 for required in (
-    "name: Namespace runner metadata qualification",
-    "runs-on: namespace-profile-fleck",
+    "name: GitHub-hosted macOS runner metadata qualification",
+    "runs-on: macos-26",
     "timeout-minutes: 5",
 ):
     if required not in qualification:
@@ -3017,6 +2993,84 @@ boundary_names = (
     "Declare native capture boundary (candidate graph)",
 )
 normalized_workflow = current_workflow
+# Assert the exact additive merge-queue contract before restoring the immutable baseline.
+queue_workflow_additions = (
+    (
+        '    branches: [main]\n'
+        '  merge_group:\n'
+        '    types: [checks_requested]\n'
+        '    branches: [main]\n'
+        '  workflow_dispatch:\n',
+        '    branches: [main]\n'
+        '  workflow_dispatch:\n',
+    ),
+    (
+        '      ENHANCED_RESULT: ${{ needs.macos-enhanced.result }}\n'
+        '      ENHANCED_COMMIT: ${{ needs.macos-enhanced.outputs.source_commit }}\n'
+        '      ENHANCED_TREE: ${{ needs.macos-enhanced.outputs.source_tree }}\n'
+        '      ENHANCED_VERSION: ${{ needs.macos-enhanced.outputs.product_version }}\n'
+        '      INITIAL_COMMIT: ${{ needs.macos-build.outputs.source_commit }}\n',
+        '      ENHANCED_RESULT: ${{ needs.macos-enhanced.result }}\n'
+        '      INITIAL_COMMIT: ${{ needs.macos-build.outputs.source_commit }}\n',
+    ),
+    (
+        '          test "${#DETECTED_WORKFLOW_SHA256}" -eq 64\n'
+        '          if [[ "${GITHUB_EVENT_NAME:-}" == merge_group ]]; then\n'
+        '            test "$ROUTE" = full\n'
+        '            test "$ENHANCED_COMMIT" = "$DETECTED_COMMIT"\n'
+        '            test "$ENHANCED_TREE" = "$DETECTED_TREE"\n'
+        '            test "$ENHANCED_VERSION" = "$DETECTED_VERSION"\n'
+        '          fi\n'
+        '          case "$ROUTE" in\n',
+        '          test "${#DETECTED_WORKFLOW_SHA256}" -eq 64\n'
+        '          case "$ROUTE" in\n',
+    ),
+    (
+        '    timeout-minutes: 90\n'
+        '    outputs:\n'
+        '      source_commit: ${{ steps.queue-source.outputs.source_commit }}\n'
+        '      source_tree: ${{ steps.queue-source.outputs.source_tree }}\n'
+        '      product_version: ${{ steps.queue-source.outputs.product_version }}\n'
+        '    env:\n',
+        '    timeout-minutes: 90\n'
+        '    env:\n',
+    ),
+    (
+        '        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd\n'
+        '      - name: Verify queued Enhanced checkout\n'
+        "        if: ${{ github.event_name == 'merge_group' }}\n"
+        '        run: |\n'
+        '          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"\n'
+        '          test -z "$(git status --porcelain)"\n'
+        '      - name: Toolchain\n',
+        '        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd\n'
+        '      - name: Toolchain\n',
+    ),
+    (
+        '\n'
+        '      - name: Verify Enhanced coverage source remained pinned\n'
+        '        id: queue-source\n'
+        "        if: ${{ github.event_name == 'merge_group' }}\n"
+        '        run: |\n'
+        '          set -euo pipefail\n'
+        '          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"\n'
+        '          test -z "$(git status --porcelain)"\n'
+        '          {\n'
+        '            printf \'source_commit=%s\\n\' "$(git rev-parse HEAD)"\n'
+        '            printf \'source_tree=%s\\n\' "$(git rev-parse HEAD^{tree})"\n'
+        '            printf \'product_version=%s\\n\' "$(cat VERSION)"\n'
+        '          } >> "$GITHUB_OUTPUT"\n'
+        '\n'
+        '  own-window-capture-probe:\n',
+        '\n'
+        '  own-window-capture-probe:\n',
+    ),
+)
+for queued_block, baseline_block in queue_workflow_additions:
+    if normalized_workflow.count(queued_block) != 1:
+        raise SystemExit("CI merge-queue addition is missing, moved, or duplicated")
+    normalized_workflow = normalized_workflow.replace(queued_block, baseline_block, 1)
+
 preflight_environment = re.search(
     r"^env:\n  FLECK_EDITOR_PREFLIGHT_SELECTOR: '([^']+)'\n\n",
     current_workflow, re.M,
@@ -3069,7 +3123,7 @@ if normalized_workflow.count(preflight_control) != 1:
     raise SystemExit("native preflight runner controls must run once in CI")
 normalized_workflow = normalized_workflow.replace(preflight_control, "", 1)
 normalized_inputs = dict(input_blocks)
-for input_name in ("native_runner_provider", "namespace_qualification_only"):
+for input_name in ("namespace_qualification_only",):
     if dispatch.group("body").count(f"{input_name}:") != 1:
         raise SystemExit(f"workflow_dispatch must declare one {input_name} input")
     input_match = re.search(
@@ -3137,9 +3191,23 @@ for name in (ordinary_name, candidate_name):
         + block.replace(environment, "", 1)
         + normalized_workflow[end:]
     )
-if normalized_workflow.count(native_routing) != len(native_jobs):
-    raise SystemExit("declared native runner routing must select exactly four jobs")
-normalized_workflow = normalized_workflow.replace(native_routing, "runs-on: macos-26")
+# Reverse only the approved portable and Blacksmith runner changes before comparing the
+# original frozen coverage contract; the actual labels are asserted above.
+for job_id in ("detect-changes", "docs-validation", "macos"):
+    start, end, block = job_block(normalized_workflow, job_id)
+    normalized_workflow = (normalized_workflow[:start]
+        + block.replace("runs-on: ubuntu-24.04", "runs-on: namespace-profile-fleck", 1)
+        + normalized_workflow[end:])
+_, _, enhanced_current = job_block(current_workflow, "macos-enhanced")
+if enhanced_current.count("NOT RUN in hosted CI (FLECK_NATIVE_CAPTURE_QA=0).") != 1:
+    raise SystemExit("Enhanced CI must declare its native-capture boundary")
+for job_id in blacksmith_jobs:
+    start, end, block = job_block(normalized_workflow, job_id)
+    label = f"    runs-on: {blacksmith_runner}\n"
+    if block.count(label) != 1:
+        raise SystemExit(f"CI {job_id} must contain its exact Blacksmith runner once")
+    block = block.replace(label, "    runs-on: macos-26\n", 1)
+    normalized_workflow = normalized_workflow[:start] + block + normalized_workflow[end:]
 for job_id, original in full_ci_job_names.items():
     dynamic_name = diagnostic_only_name(original)
     if normalized_workflow.count(dynamic_name) != 1:
