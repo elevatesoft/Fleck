@@ -2641,7 +2641,15 @@ private func temporaryForegroundColor(in textView: NSTextView, at index: Int) ->
   )
   let overflowItems = try #require(
     source.components(separatedBy: "private func overflowItem(_ item:").last?
-      .components(separatedBy: "private func bulletMenuItems").first
+      .components(separatedBy: "private func listMenuItems").first
+  )
+  let directMenus = try #require(
+    source.components(separatedBy: "private func directFormattingMenu(_ item:").last?
+      .components(separatedBy: "private func formattingBranch").first
+  )
+  let overflowMenus = try #require(
+    source.components(separatedBy: "private func formattingBranch").last?
+      .components(separatedBy: "@ViewBuilder private var toolsInsertMenu").first
   )
   let iconLabel = try #require(
     source.components(separatedBy: "private struct FormattingMenuIconLabel: View").last?
@@ -2651,12 +2659,12 @@ private func temporaryForegroundColor(in textView: NSTextView, at index: Int) ->
   for symbol in ["textformat.alt", "arrow.up.and.down.text.horizontal", "wrench.adjustable"] {
     #expect(NSImage(systemSymbolName: symbol, accessibilityDescription: nil) != nil)
   }
-  #expect(directItems.contains("textMenu(iconOnly: true)"))
-  #expect(directItems.contains("paragraphMenu(iconOnly: true)"))
-  #expect(directItems.contains("toolsInsertMenu(title: \"Tools\", iconOnly: true)"))
-  #expect(overflowItems.contains("textMenu(iconOnly: false)"))
-  #expect(overflowItems.contains("paragraphMenu(iconOnly: false)"))
-  #expect(overflowItems.contains("toolsInsertMenu(title: \"Tools / Insert\", iconOnly: false)"))
+  #expect(directItems.contains("case .textStyles, .text, .paragraph:\n        directFormattingMenu(item)"))
+  #expect(directItems.contains(".control(.tools), attachedTo: toolsInsertMenu"))
+  #expect(directMenus.contains("formattingBranch(item, fromOverflow: false)"))
+  #expect(overflowItems.contains("case .textStyles, .text, .paragraph:\n        return formattingBranch(item, fromOverflow: true)"))
+  #expect(overflowItems.contains("NotesCascadeItem(\"Tools / Insert\""))
+  #expect(overflowItems.contains("items: toolsInsertActions(fromOverflow: true)"))
   #expect(source.contains("FormattingMenuIconLabel(systemImage: \"textformat.alt\")"))
   #expect(source.contains("FormattingMenuIconLabel(systemImage: \"arrow.up.and.down.text.horizontal\")"))
   #expect(source.contains("FormattingMenuIconLabel(systemImage: \"wrench.adjustable\")"))
@@ -2668,21 +2676,20 @@ private func temporaryForegroundColor(in textView: NSTextView, at index: Int) ->
   #expect(iconLabel.contains(".contentShape(Rectangle())"))
   #expect(!iconLabel.contains(".frame(width:"))
   #expect(source.contains(".frame(width: 28, height: 26)"))
-  #expect(source.components(separatedBy: ".menuIndicator(iconOnly ? .hidden : .automatic)").count - 1 == 3)
-  #expect(source.contains("Text(\"Text\")"))
-  #expect(source.contains("Text(\"Paragraph\")"))
-  #expect(source.contains("Text(title)"))
-  #expect(source.contains(".accessibilityLabel(\"Text\")"))
-  #expect(source.contains(".accessibilityLabel(\"Paragraph\")"))
-  #expect(source.contains(".accessibilityLabel(title)"))
-  #expect(source.contains(".help(\"Text formatting\")"))
-  #expect(source.contains(".help(\"Paragraph formatting\")"))
+  #expect(directMenus.contains(".menuIndicator(item == .textStyles ? .automatic : .hidden)"))
+  #expect(directMenus.contains(".accessibilityLabel(branch.title)"))
+  #expect(directMenus.contains(".help(branch.help"))
+  #expect(overflowMenus.contains("NotesCascadeItem(\"Text\", icon: \"bold\", help: \"Text formatting\""))
+  #expect(overflowMenus.contains("NotesCascadeItem(\"Paragraph\", icon: \"list.bullet\", help: \"Paragraph formatting\""))
+  #expect(source.contains("NotesNativeMenuItem(item: overflowItem(item)"))
+  #expect(source.contains("NotesFormattingCascade(items: overflowItems(items), chrome: solidChrome)"))
+  #expect(source.contains(".accessibilityLabel(\"Tools\")"))
   #expect(source.contains(".help(\"Links and find tools\")"))
   #expect(source.contains("FormattingOverflowLabel()"))
   #expect(source.contains("Image(systemName: \"ellipsis\")"))
   #expect(source.contains(".font(.system(size: 17, weight: .bold))"))
   #expect(!formattingBar.contains("ellipsis.circle"))
-  #expect(formattingBar.components(separatedBy: ".popover(item: $presentedPopover").count - 1 == 1)
+  #expect(formattingBar.components(separatedBy: ".popover(item: popoverBinding(for: .toolbar)").count - 1 == 1)
   #expect(!formattingBar.contains(".popover(isPresented:"))
   #expect(formattingBar.contains("case webLink"))
   #expect(formattingBar.contains("case .webLink:"))

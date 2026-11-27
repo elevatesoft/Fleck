@@ -44,7 +44,7 @@ The glyph paths in `Sources/FleckApp/NotesPaperIcon.swift` are adapted from
 [Lucide 0.511.0](https://github.com/lucide-icons/lucide/tree/0.511.0/icons).
 The copied path geometry is not MPL-covered. The Lucide paths carry the
 [ISC license](docs/licenses/Lucide-0.511.0-LICENSE.txt); the Feather-derived
-search, plus, chevron and horizontal ellipsis also retain the upstream
+search, plus, chevron, horizontal ellipsis and microphone also retain the upstream
 [Feather MIT license](docs/licenses/Feather-4.29.2-LICENSE.txt). Both notices
 are retained in source and included by the app packager. Fleck renders the paths
 in SwiftUI without adding a runtime dependency.

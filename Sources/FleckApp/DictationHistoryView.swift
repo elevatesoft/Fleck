@@ -182,59 +182,80 @@
   }
 
   struct DictationHistoryView: View {
+    private static let paperHeaderHeight: CGFloat = 83
+
     @Environment(\.dismiss) private var dismiss
     @Environment(\.fleckThemeSnapshot) private var theme
+    @Environment(\.locale) private var locale
+    @Environment(\.calendar) private var calendar
+    @Environment(\.timeZone) private var timeZone
     @StateObject private var model: DictationHistoryViewModel
     @ObservedObject private var history: DictationHistoryController
     @FocusState private var headerFocus: HeaderAction?
     private let notesChrome: NotesSolidChrome?
+    private let liveNoteIDs: Set<UUID>?
     let onOpenDestination: (UUID) -> Void
 
-    private enum HeaderAction { case clear, done }
+    private enum HeaderAction { case clear, done, cancelClear, confirmClear }
+
+    private var showsPaperClear: Bool {
+      notesChrome != nil && model.pendingConfirmation == .clear
+    }
 
     init(
       history: DictationHistoryController,
       notesChrome: NotesSolidChrome? = nil,
+      liveNoteIDs: Set<UUID>? = nil,
       onOpenDestination: @escaping (UUID) -> Void
     ) {
       _model = StateObject(wrappedValue: DictationHistoryViewModel(controller: history))
       _history = ObservedObject(wrappedValue: history)
       self.notesChrome = notesChrome?.isActive == true ? notesChrome : nil
+      self.liveNoteIDs = liveNoteIDs
       self.onOpenDestination = onOpenDestination
     }
 
     var body: some View {
       VStack(spacing: 0) {
-        HStack(spacing: notesChrome == nil ? nil : 8) {
-          VStack(alignment: .leading, spacing: 6) {
-            Text("Dictation History")
-              .font(notesChrome == nil ? .title2.weight(.semibold) : .system(size: 20, weight: .semibold))
-              .accessibilityAddTraits(.isHeader)
-            if notesChrome != nil {
+        if let notesChrome {
+          HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 7) {
+              Text("Dictation History")
+                .font(.system(size: 20, weight: .medium))
+                .tracking(0.35)
+                .foregroundStyle(paperInk("#ECEEF1"))
+                .frame(height: 20)
+                .accessibilityAddTraits(.isHeader)
               Text("Local transcripts · Kept for 30 days")
                 .font(.system(size: 12))
-                .foregroundStyle(theme.color(.caption))
+                .foregroundStyle(paperInk("#B1B6BF"))
+                .frame(height: 20)
             }
+            .padding(.top, 19)
+            Spacer(minLength: 8)
+            headerActions
+              .padding(.top, 25)
           }
-          .padding(.bottom, notesChrome == nil ? 0 : 6)
-          Spacer()
-          headerActions
-        }
-        .padding(.horizontal, notesChrome == nil ? 16 : 22)
-        .padding(.vertical, 16)
-        .frame(height: notesChrome == nil ? nil : 82)
-        .background {
-          if let notesChrome { notesChrome.historyHeader }
-        }
-        .overlay(alignment: .bottom) {
-          if let notesChrome {
+          .padding(.leading, 23)
+          .padding(.trailing, 21)
+          .frame(height: Self.paperHeaderHeight, alignment: .top)
+          .background(notesChrome.historyHeader)
+          .overlay(alignment: .bottom) {
             Rectangle().fill(notesChrome.historySeparator).frame(height: 1)
               .allowsHitTesting(false)
               .accessibilityHidden(true)
           }
+        } else {
+          HStack {
+            Text("Dictation History")
+              .font(.title2.weight(.semibold))
+              .accessibilityAddTraits(.isHeader)
+            Spacer()
+            headerActions
+          }
+          .padding(16)
+          Divider()
         }
-
-        if notesChrome == nil { Divider() }
 
         if history.records.isEmpty {
           if notesChrome != nil {
@@ -245,16 +266,17 @@
                 .frame(width: 48, height: 48)
                 .accessibilityHidden(true)
               Text("No Dictation History")
-                .font(.system(size: 20, weight: .semibold))
+                .font(.system(size: 20, weight: .medium))
+                .tracking(0.35)
                 .accessibilityAddTraits(.isHeader)
-                .padding(.top, 17)
+                .padding(.top, 16)
               Text("Successful captures kept for recovery appear here for 30 days.")
                 .font(.system(size: 14))
                 .foregroundStyle(theme.color(.textSecondary))
                 .lineSpacing(3)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 270)
-                .padding(.top, 15)
+                .padding(.top, 16)
             }
             .padding(.bottom, 20)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -266,19 +288,21 @@
             )
           }
         } else if let notesChrome {
+          let dateFormatter = paperDateFormatter
           ScrollView {
             LazyVStack(spacing: 0) {
               ForEach(history.records) { record in
-                historyRow(record)
-                  .padding(.vertical, 12)
+                historyRow(record, paperDateFormatter: dateFormatter)
                   .overlay(alignment: .bottom) {
-                    Rectangle().fill(notesChrome.historySeparator).frame(height: 1)
-                      .allowsHitTesting(false)
-                      .accessibilityHidden(true)
+                    if record.id != history.records.last?.id {
+                      Rectangle().fill(notesChrome.historySeparator).frame(height: 1)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                    }
                   }
               }
             }
-            .padding(.horizontal, 22)
+            .padding(.horizontal, 23)
           }
         } else {
           List(history.records) { record in
@@ -288,6 +312,8 @@
         }
       }
       .frame(minWidth: notesChrome == nil ? 640 : 680, minHeight: notesChrome == nil ? 440 : 490)
+      .disabled(showsPaperClear)
+      .accessibilityHidden(showsPaperClear)
       .background {
         if let notesChrome { notesChrome.historySurface }
       }
@@ -299,14 +325,28 @@
             .accessibilityHidden(true)
         }
       }
+      .overlay {
+        if showsPaperClear {
+          ZStack {
+            Color.black.opacity(0.6).padding(.top, Self.paperHeaderHeight).accessibilityHidden(true)
+            paperClearConfirmation.offset(y: 10)
+          }
+        }
+      }
+      .onChange(of: showsPaperClear) { _, isPresented in
+        headerFocus = isPresented ? .cancelClear : .clear
+      }
+      .onChange(of: history.records.isEmpty) { _, isEmpty in
+        if isEmpty && headerFocus == .clear { headerFocus = .done }
+      }
       .task {
         await history.load()
       }
       .confirmationDialog(
         confirmationTitle,
         isPresented: Binding(
-          get: { model.pendingConfirmation != nil },
-          set: { if !$0 { model.cancelConfirmation() } }
+          get: { model.pendingConfirmation != nil && !showsPaperClear },
+          set: { if !$0 && !showsPaperClear { model.cancelConfirmation() } }
         )
       ) {
         Button(confirmationButtonTitle, role: .destructive) {
@@ -336,15 +376,15 @@
     @ViewBuilder
     private var headerActions: some View {
       let isEmpty = history.records.isEmpty
-      let clear = Button("Clear History", role: .destructive) { model.requestClear() }
-      let done = Button("Done") { dismiss() }
       if let notesChrome {
-        clear
-          .buttonStyle(NotesSolidActionStyle(width: 116, height: 32, ink: theme.color(isEmpty ? .caption : .error)))
+        Button(role: .destructive, action: model.requestClear) { paperActionLabel("Clear History") }
+          .buttonStyle(NotesSolidActionStyle(
+            width: 116, height: 32, ink: paperInk(isEmpty ? "#858B95" : "#FF969B")
+          ))
           .focused($headerFocus, equals: .clear)
           .fleckNeutralControlOutline(isFocused: headerFocus == .clear, cornerRadius: 6)
           .disabled(isEmpty)
-        done
+        Button(action: { dismiss() }) { paperActionLabel("Done") }
           .buttonStyle(NotesSolidActionStyle(
             width: 66, height: 32, ink: theme.color(.accentText), surface: notesChrome.historyDone
           ))
@@ -352,14 +392,91 @@
           .fleckNeutralControlOutline(isFocused: headerFocus == .done, cornerRadius: 6)
           .keyboardShortcut(.defaultAction)
       } else {
-        clear.disabled(isEmpty)
-        done.keyboardShortcut(.defaultAction)
+        Button("Clear History", role: .destructive, action: model.requestClear)
+          .disabled(isEmpty)
+        Button("Done") { dismiss() }
+          .keyboardShortcut(.defaultAction)
       }
     }
 
-    private func historyRow(_ record: DictationHistoryRecord) -> some View {
+    private var paperDateFormatter: DateFormatter {
+      let formatter = DateFormatter()
+      formatter.locale = locale
+      formatter.calendar = calendar
+      formatter.timeZone = timeZone
+      formatter.dateStyle = .short
+      formatter.timeStyle = .short
+      formatter.doesRelativeDateFormatting = true
+      return formatter
+    }
+
+    private var paperClearConfirmation: some View {
+      let shape = RoundedRectangle(cornerRadius: 12)
+      return VStack(spacing: 0) {
+        VStack(alignment: .leading, spacing: 22) {
+          Text(confirmationTitle)
+            .font(.system(size: 17, weight: .medium))
+            .tracking(0.3)
+            .foregroundStyle(paperInk("#ECEEF1"))
+            .accessibilityAddTraits(.isHeader)
+          Text("This removes all local transcript records.\nThis cannot be undone.")
+            .font(.system(size: 14))
+            .lineSpacing(3)
+            .foregroundStyle(paperInk("#C3C8D0"))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.horizontal, 24)
+        .padding(.top, 23)
+
+        Rectangle().fill(paperInk("#464A52")).frame(height: 1).accessibilityHidden(true)
+
+        HStack(spacing: 12) {
+          Button(role: .cancel, action: model.cancelConfirmation) { paperActionLabel("Cancel") }
+            .buttonStyle(NotesSolidActionStyle(
+              width: 164, height: 32, ink: paperInk("#ECEEF1"),
+              surface: paperInk("#35383E"), outline: paperInk("#464A51")
+            ))
+            .focused($headerFocus, equals: .cancelClear)
+            .fleckNeutralControlOutline(isFocused: headerFocus == .cancelClear, cornerRadius: 6)
+            .keyboardShortcut(.cancelAction)
+          Button(role: .destructive) {
+            Task { await model.confirmRemoval() }
+          } label: {
+            paperActionLabel("Clear History")
+          }
+          .buttonStyle(NotesSolidActionStyle(
+            width: 164, height: 32, ink: .white,
+            surface: paperInk("#B93946"), outline: paperInk("#D15560")
+          ))
+          .focused($headerFocus, equals: .confirmClear)
+          .fleckNeutralControlOutline(isFocused: headerFocus == .confirmClear, cornerRadius: 6)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 18)
+        .frame(height: 70, alignment: .top)
+        .background(paperInk("#25282C"))
+      }
+      .frame(width: 388, height: 196)
+      .background(paperInk("#292C31"))
+      .clipShape(shape)
+      .overlay {
+        shape.strokeBorder(paperInk("#53575F"), lineWidth: 1)
+          .allowsHitTesting(false)
+      }
+      .shadow(color: .black.opacity(119.0 / 255), radius: 20, y: 14)
+      .accessibilityElement(children: .contain)
+    }
+
+    private func paperInk(_ hex: String) -> Color {
+      Color(nsColor: NSColor(hex: hex)!)
+    }
+
+    private func historyRow(
+      _ record: DictationHistoryRecord, paperDateFormatter: DateFormatter? = nil
+    ) -> some View {
       HistoryRow(
-        record: record, solid: notesChrome != nil, onOpenDestination: onOpenDestination,
+        record: record, paperDateFormatter: paperDateFormatter, liveNoteIDs: liveNoteIDs,
+        onOpenDestination: onOpenDestination,
         onDelete: { model.requestDelete(record.id) }
       )
     }
@@ -399,13 +516,23 @@
   }
 
   private struct HistoryRow: View {
+    @Environment(\.fleckThemeSnapshot) private var theme
     let record: DictationHistoryRecord
-    let solid: Bool
+    let paperDateFormatter: DateFormatter?
+    let liveNoteIDs: Set<UUID>?
     let onOpenDestination: (UUID) -> Void
     let onDelete: () -> Void
 
     var body: some View {
       let presentation = DictationHistoryRowPresentation(record: record)
+      if let paperDateFormatter {
+        paperRow(presentation, dateFormatter: paperDateFormatter)
+      } else {
+        standardRow(presentation)
+      }
+    }
+
+    private func standardRow(_ presentation: DictationHistoryRowPresentation) -> some View {
       VStack(alignment: .leading, spacing: 10) {
         HStack(alignment: .firstTextBaseline) {
           Text(record.completedAt.formatted(date: .abbreviated, time: .shortened))
@@ -438,9 +565,121 @@
           Spacer()
           Button("Delete", role: .destructive, action: onDelete)
         }
-        .modifier(HistoryRowButtonStyle(solid: solid))
+        .buttonStyle(.borderless)
       }
       .padding(.vertical, 8)
+    }
+
+    private func paperRow(
+      _ presentation: DictationHistoryRowPresentation, dateFormatter: DateFormatter
+    ) -> some View {
+      let metadata = paperInk("#B9BEC6")
+      let showsRawComparison = presentation.rawTranscript != nil
+      return VStack(alignment: .leading, spacing: 0) {
+        Text(dateFormatter.string(from: record.completedAt))
+          .font(.system(size: 12))
+          .foregroundStyle(metadata)
+          .padding(.bottom, 9)
+        paperTranscript(presentation.primaryTitle, text: presentation.primaryTranscript)
+        if let rawTranscript = presentation.rawTranscript {
+          paperTranscript("Raw", text: rawTranscript, isSecondary: true).padding(.top, 16)
+        }
+        HStack(spacing: 6) {
+          Image(systemName: savedDestination == nil ? "exclamationmark.triangle" : "note.text")
+            .font(.system(size: 10))
+            .frame(width: 14, height: 14)
+            .accessibilityHidden(true)
+          if let savedDestination {
+            HStack(spacing: 0) {
+              Text("Saved to ")
+              if canOpenPaperDestination {
+                Button {
+                  onOpenDestination(savedDestination.noteID)
+                } label: {
+                  Text(savedDestination.title).underline()
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Open the destination note")
+              } else {
+                Text(savedDestination.title)
+              }
+            }
+          } else {
+            Text("Not saved to a note")
+          }
+        }
+        .font(.system(size: 13))
+        .foregroundStyle(metadata)
+        .padding(.top, showsRawComparison ? 14 : 10)
+        HStack(spacing: 8) {
+          if presentation.canCopyClean {
+            Button(action: { copy(presentation.primaryTranscript) }) {
+              paperActionLabel("Copy Clean")
+            }
+            .buttonStyle(paperAction(width: 90))
+          }
+          Button(action: { copy(record.rawTranscript) }) {
+            paperActionLabel("Copy Raw")
+          }
+          .buttonStyle(paperAction(width: presentation.canCopyClean ? 82 : 90))
+          Button {
+            guard canOpenPaperDestination, let savedDestination else { return }
+            onOpenDestination(savedDestination.noteID)
+          } label: {
+            paperActionLabel("Open Destination")
+          }
+          .buttonStyle(paperAction(width: 140, disabled: !canOpenPaperDestination))
+          .disabled(!canOpenPaperDestination)
+          Spacer(minLength: 0)
+          Button(role: .destructive, action: onDelete) { paperActionLabel("Delete") }
+            .buttonStyle(paperAction(width: 70, destructive: true))
+        }
+        .padding(.top, showsRawComparison ? 11 : 15)
+      }
+      .padding(.top, 22)
+      .padding(.bottom, showsRawComparison ? 19 : 12)
+    }
+
+    private func paperTranscript(_ title: String, text: String, isSecondary: Bool = false) -> some View {
+      VStack(alignment: .leading, spacing: isSecondary ? 5 : 4) {
+        Text(title)
+          .font(.system(size: 12))
+          .foregroundStyle(paperInk("#B9BEC6"))
+        Text(text)
+          .font(.system(
+            size: isSecondary ? 14 : 16, weight: theme.increasedContrast ? .regular : .light
+          ))
+          .tracking(0.3)
+          .foregroundStyle(paperInk(isSecondary ? "#CDD1D7" : "#ECEEF1"))
+          .lineSpacing(4)
+          .textSelection(.enabled)
+          .frame(maxWidth: .infinity, alignment: .leading)
+      }
+    }
+
+    private var savedDestination: DictationDestination? {
+      record.insertionOutcome == .saved ? record.destination : nil
+    }
+
+    private var canOpenPaperDestination: Bool {
+      guard let savedDestination else { return false }
+      return liveNoteIDs?.contains(savedDestination.noteID) ?? true
+    }
+
+    private func paperInk(_ hex: String) -> Color {
+      Color(nsColor: NSColor(hex: hex)!)
+    }
+
+    private func paperAction(
+      width: CGFloat, disabled: Bool = false, destructive: Bool = false
+    ) -> NotesSolidActionStyle {
+      let red = paperInk("#FF969B")
+      return NotesSolidActionStyle(
+        width: width, height: 32,
+        ink: destructive ? red : paperInk(disabled ? "#858B95" : "#ECEEF1"),
+        surface: destructive ? red.opacity(13.0 / 255) : paperInk(disabled ? "#292C31" : "#35383E"),
+        outline: destructive ? red.opacity(40.0 / 255) : paperInk(disabled ? "#34373D" : "#464A51")
+      )
     }
 
     private var destinationTitle: String {
@@ -470,12 +709,8 @@
     }
   }
 
-  private struct HistoryRowButtonStyle: ViewModifier {
-    let solid: Bool
-
-    func body(content: Content) -> some View {
-      if solid { content.buttonStyle(.bordered) }
-      else { content.buttonStyle(.borderless) }
-    }
+  private func paperActionLabel(_ title: LocalizedStringKey) -> some View {
+    Text(title).font(.system(size: 13))
   }
+
 #endif

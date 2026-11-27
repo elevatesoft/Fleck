@@ -92,7 +92,7 @@ private struct HostedToolbarOverflowView: View {
           .frame(width: itemWidths[index], height: 20)
           .accessibilityLabel("Item \(index)")
       }
-    } overflow: { _ in
+    } overflow: { _, _ in
       Button("More formatting") {}
         .buttonStyle(.plain)
         .frame(width: 16, height: 20)

@@ -6,6 +6,7 @@
 
   enum NoteTabInk {
     static let selectedCapsuleOpacity = 0.22
+    static let solidCapsuleOutset: CGFloat = 2
 
     static func selectedCapsuleFill(tabColor: NSColor, surfaceColor: NSColor) -> NSColor {
       FleckColorContrast.composite(
@@ -989,10 +990,10 @@
     @State private var isShowingTrash = false
     @State private var isShowingDictationHistory = false
     @State private var isShowingAgentActivity = false
+    @State private var isShowingActivityInbox = false
     @State private var notePendingDeletion: Note?
     @State private var folderPendingDeletion: Folder?
     @State private var dontAskAgainForDeletion = false
-    @State private var notePendingAgentShare: Note?
     @State private var exportDocument: NoteFileDocument?
     @State private var exportType = NoteFileDocument.markdownContentType
     @State private var exportFilename = "Untitled.md"
@@ -1049,7 +1050,7 @@
     private var navigationDivider: some View {
       Group {
         if solidChrome.isActive {
-          Rectangle().fill(solidChrome.outline).frame(height: 1)
+          Rectangle().fill(solidChrome.notesNavigationDivider).frame(height: 1)
         } else {
           Divider().opacity(0.35)
         }
@@ -1081,27 +1082,35 @@
                 actionPanes: failure.actions.map(\.pane)
               )
               if bannerDismissalState.isPresented(occurrence) {
-                HStack(spacing: 8) {
-                  Label(failure.message, systemImage: "exclamationmark.triangle")
-                    .fleckUIFont(.caption)
-                  Spacer()
-                  ForEach(failure.actions, id: \.pane) { action in
-                    Button(action.title) {
-                      dictationRuntime.openSystemSettings(action)
+                if solidChrome.isActive {
+                  darkSolidCaptureFailure(failure, occurrence: occurrence)
+                  .padding(solidChrome.windowEdgePadding(
+                    horizontal: 11, after: menuPanelResizePaintInsets
+                  ))
+                  .padding(.vertical, 7)
+                } else {
+                  HStack(spacing: 8) {
+                    Label(failure.message, systemImage: "exclamationmark.triangle")
+                      .fleckUIFont(.caption)
+                    Spacer()
+                    ForEach(failure.actions, id: \.pane) { action in
+                      Button(action.title) {
+                        dictationRuntime.openSystemSettings(action)
+                      }
+                      .accessibilityLabel(action.title)
                     }
-                    .accessibilityLabel(action.title)
+                    NotesPanelBannerCloseButton(
+                      label: "dictation capture failure",
+                      action: { dismissBanner(occurrence) }
+                    )
                   }
-                  NotesPanelBannerCloseButton(
-                    label: "dictation capture failure",
-                    action: { dismissBanner(occurrence) }
-                  )
+                  .padding(.horizontal, 10)
+                  .padding(.vertical, 7)
+                  .foregroundStyle(theme.color(.textPrimary))
+                  .background(theme.color(.raised))
+                  .accessibilityElement(children: .contain)
+                  .accessibilityLabel("Dictation unavailable")
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .foregroundStyle(theme.color(.textPrimary))
-                .background(theme.color(.raised))
-                .accessibilityElement(children: .contain)
-                .accessibilityLabel("Dictation unavailable")
               }
             }
             if !solidChrome.isActive || !isEditorVisible {
@@ -1113,30 +1122,40 @@
             if let error = appState.saveError,
               !(solidChrome.isActive && isShowingTrash && appState.trashUpdateError != nil)
             {
-              HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("Could not save: \(error)")
-                  .fleckUIFont(.caption)
-                  .foregroundStyle(theme.color(.error))
-                  .frame(maxWidth: .infinity, alignment: .leading)
-                if appState.canRetryPersistenceSave {
-                  Button("Retry") {
-                    appState.retryPersistenceSave()
+              if solidChrome.isActive {
+                paperSaveError(error)
+              } else {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                  Text("Could not save: \(error)")
+                    .fleckUIFont(.caption)
+                    .foregroundStyle(theme.color(.error))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                  if appState.canRetryPersistenceSave {
+                    Button("Retry") {
+                      appState.retryPersistenceSave()
+                    }
+                    .buttonStyle(.link)
+                    .controlSize(.small)
+                    .accessibilityIdentifier("save-error-retry-button")
+                    .help("Try saving these changes again")
                   }
-                  .buttonStyle(.link)
-                  .controlSize(.small)
-                  .accessibilityIdentifier("save-error-retry-button")
-                  .help("Try saving these changes again")
                 }
+                .padding(8)
               }
-              .padding(.horizontal, solidChrome.isActive ? 17 : 8)
-              .padding(.vertical, 8)
             }
             if let error = appState.noteFileReferenceError {
-              Text(error)
-                .fleckUIFont(.caption)
-                .foregroundStyle(theme.color(.error))
-                .padding(8)
-                .frame(maxWidth: .infinity, alignment: .leading)
+              if solidChrome.isActive {
+                NotesBannerNotice(icon: .system("paperclip"), message: error, isError: true)
+                  .padding(solidChrome.windowEdgePadding(
+                    horizontal: 11, bottom: 4, after: menuPanelResizePaintInsets
+                  ))
+              } else {
+                Text(error)
+                  .fleckUIFont(.caption)
+                  .foregroundStyle(theme.color(.error))
+                  .padding(8)
+                  .frame(maxWidth: .infinity, alignment: .leading)
+              }
             }
           }
         }
@@ -1269,6 +1288,14 @@
         outline: solidChrome.isActive && !isPinned && menuPanelBodyIsPainted
           ? solidChrome.outline : nil
       ))
+      .background {
+        if solidChrome.isActive, isEditorVisible,
+          dictationRuntime.isInputMonitoringNoticeDismissed,
+          dictationRuntime.modifierMonitorState == .unauthorized
+        {
+          NotesModifierAttemptObserver(onPress: dictationRuntime.observeLocalModifierAttempt)
+        }
+      }
       .overlay {
         if !isPinned, sizing == .storedPreferences {
           if let reorderDragSession {
@@ -1368,19 +1395,13 @@
         DictationHistoryView(
           history: dictationRuntime.historyController,
           notesChrome: solidChrome,
+          liveNoteIDs: Set(appState.workspace.notes.map(\.id)),
           onOpenDestination: openHistoryDestination
         )
       }
       .sheet(isPresented: agentActivitySheetPresentation) {
         agentActivityContent
           .frame(minWidth: 520, minHeight: 380)
-      }
-      .sheet(item: $notePendingAgentShare) { note in
-        AgentNoteAccessEditorView(
-          note: note,
-          onDismiss: { notePendingAgentShare = nil }
-        )
-          .environmentObject(appState)
       }
       .onAppear {
         dictationRuntime.registerEditor(editorCommands)
@@ -1445,6 +1466,34 @@
       dictationRuntime.modifierShortcutPresentation
     }
 
+    private var paperModifierShortcutRecovery: some View {
+      let presentation = modifierShortcutPresentation
+      let actions = presentation.recoveryButtonTitle.map {
+        [NotesBannerNotice.Action(title: $0, perform: performShortcutRecovery)]
+      } ?? []
+      return NotesBannerNotice(
+        icon: .system("keyboard"),
+        message: presentation.statusCopy,
+        detail: presentation.detailCopy,
+        actions: actions,
+        onDismiss: presentation.recoveryAction == .enableInputMonitoring
+          ? .init(title: "Dismiss Input Monitoring notice",
+                  perform: dictationRuntime.dismissInputMonitoringNotice)
+          : nil
+      )
+      .accessibilityLabel(presentation.capsuleAccessibilityLabel)
+      .padding(solidChrome.windowEdgePadding(horizontal: 11, after: menuPanelResizePaintInsets))
+      .padding(.vertical, 7)
+    }
+
+    private func performShortcutRecovery() {
+      Task { @MainActor in
+        await dictationRuntime.performModifierShortcutRecovery {
+          dictationRuntime.openSystemSettings($0)
+        }
+      }
+    }
+
     private var activeBannerOccurrences: Set<NotesPanelBannerOccurrence> {
       let captureFailure = dictationRuntime.captureFailure.map {
         NotesPanelBannerOccurrence.captureFailure(
@@ -1452,17 +1501,24 @@
           actionPanes: $0.actions.map(\.pane)
         )
       }
-      let agentChange = appState.agentBannerPresentation.map {
-        NotesPanelBannerOccurrence.agentChange(
-          changeID: $0.feedback.changeID,
-          count: $0.count
-        )
-      }
       return NotesPanelBannerPolicy.activeOccurrences(
         captureFailure: captureFailure,
         routineRecoveryAction: dictationRuntime.recoveryAction,
-        agentChange: agentChange
+        agentChange: agentBannerOccurrence
       )
+    }
+
+    private var agentBannerOccurrence: NotesPanelBannerOccurrence? {
+      appState.agentBannerPresentation.map {
+        .agentChange(changeID: $0.feedback.changeID, count: $0.count)
+      }
+    }
+
+    private var presentedAgentBannerOccurrence: NotesPanelBannerOccurrence? {
+      guard let occurrence = agentBannerOccurrence,
+        bannerDismissalState.isPresented(occurrence)
+      else { return nil }
+      return occurrence
     }
 
     private func dismissBanner(_ occurrence: NotesPanelBannerOccurrence) {
@@ -1472,16 +1528,66 @@
     }
 
     @ViewBuilder
+    private func darkSolidCaptureFailure(
+      _ failure: DictationCaptureFailurePresentation, occurrence: NotesPanelBannerOccurrence
+    ) -> some View {
+      if failure.actions.count == 2,
+        let microphone = failure.actions.first(where: { $0.pane == .microphone }),
+        let speech = failure.actions.first(where: { $0.pane == .speechRecognition })
+      {
+        NotesDictationPermissionsBanner(
+          openMicrophone: { dictationRuntime.openSystemSettings(microphone) },
+          openSpeechRecognition: { dictationRuntime.openSystemSettings(speech) },
+          dismiss: { dismissBanner(occurrence) }
+        )
+      } else {
+        NotesBannerNotice(
+          icon: .system(captureFailureIcon(failure)),
+          message: failure.message,
+          actions: failure.actions.map { action in
+            .init(title: action.title) { dictationRuntime.openSystemSettings(action) }
+          },
+          onDismiss: .init(title: "Dismiss dictation capture failure") {
+            dismissBanner(occurrence)
+          }
+        )
+        .accessibilityLabel("Dictation unavailable")
+      }
+    }
+
+    private func captureFailureIcon(_ failure: DictationCaptureFailurePresentation) -> String {
+      switch failure.actions.first?.pane {
+      case .microphone: "mic"
+      case .speechRecognition: "text.bubble"
+      case .inputMonitoring, nil: "exclamationmark.triangle"
+      }
+    }
+
+    private func paperSaveError(_ message: String) -> some View {
+      let canRetry = appState.canRetryPersistenceSave
+      return NotesBannerNotice(
+        icon: canRetry ? .save : .system(appState.saveErrorIsUnavailableNoteLink ? "link" : "exclamationmark.triangle"),
+        message: "Could not save: \(message)",
+        isError: true,
+        actions: canRetry ? [
+          .init(title: "Retry", identifier: "save-error-retry-button", help: "Try saving these changes again") {
+            appState.retryPersistenceSave()
+          }
+        ] : []
+      )
+      .padding(solidChrome.windowEdgePadding(
+        horizontal: 11, bottom: 4, after: menuPanelResizePaintInsets
+      ))
+    }
+
+    @ViewBuilder
     private var agentUpdateBanner: some View {
       if let banner = appState.agentBannerPresentation {
-        let occurrence = NotesPanelBannerOccurrence.agentChange(
-          changeID: banner.feedback.changeID,
-          count: banner.count
-        )
-        if bannerDismissalState.isPresented(occurrence) {
+        if let occurrence = presentedAgentBannerOccurrence {
           AgentChangeBanner(
             presentation: banner,
             motion: motion,
+            usesDarkSolidNotesChrome: solidChrome.isActive,
             onUndo: { Task { await appState.undoLatestAgentChange() } },
             onDoNotShowAgain: {
               appState.updatePreferences { $0.showAgentUpdateBanners = false }
@@ -1536,16 +1642,20 @@
           }
         }
         Spacer()
-        SaveFeedbackView(presentation: appState.saveFeedback, motion: motion)
+        SaveFeedbackView(
+          presentation: appState.saveFeedback,
+          motion: motion,
+          usesDarkSolidNotesChrome: solidChrome.isActive
+        )
+        .padding(.trailing, solidChrome.isActive ? 5 : 0)
+        .padding(.bottom, solidChrome.isActive ? 2 : 0)
         if solidChrome.isActive {
-          AgentActivityIndicator(presentation: appState.agentActivityIndicator, usesBell: true) {
-            isShowingAgentActivity = true
-          }
+          agentActivityInboxButton
         }
         Button {
           backlinkController.toggleDisclosure()
         } label: {
-          Image(systemName: "link")
+          notesHeaderIcon(systemName: "link", paperGlyph: .backlinks)
             .frame(width: 28, height: 28)
         }
         .accessibilityIdentifier("backlinks-toolbar-button")
@@ -1557,7 +1667,7 @@
         )
         .accessibilityHint("Show notes linking here")
         .help("Backlinks")
-        .popover(isPresented: backlinksPopoverPresentation, arrowEdge: solidChrome.isActive ? .bottom : .top) {
+        .notesAnchoredPanel(isPresented: backlinksPopoverPresentation, chrome: solidChrome, theme: theme) {
           BacklinksView(
             entries: backlinkEntries,
             foldersByID: folderNamesByID,
@@ -1574,7 +1684,6 @@
             height: solidChrome.isActive && backlinkEntries.isEmpty ? 76 : nil,
             alignment: .topLeading
           )
-          .fleckPopoverTheme(theme)
         }
         Button {
           let pointerActivation = searchPointerActivationPending
@@ -1635,7 +1744,7 @@
               openWindow(id: "pinned-notes")
             }
           } label: {
-            Image(systemName: "pin")
+            notesHeaderIcon(systemName: "pin", paperGlyph: .pin)
               .frame(width: 28, height: 28)
           }
           .accessibilityLabel("Pin notes on screen")
@@ -1687,8 +1796,9 @@
       }
       .buttonStyle(FleckQuietButtonStyle(cornerRadius: 6))
       .focusEffectDisabled(!solidChrome.isActive)
-      .padding(.horizontal, 14)
-      .padding(.vertical, solidChrome.isActive ? 6 : 11)
+      .padding(.horizontal, solidChrome.isActive ? 15 : 14)
+      .padding(.top, solidChrome.isActive ? 7 : 11)
+      .padding(.bottom, solidChrome.isActive ? 5 : 11)
     }
 
     @ViewBuilder
@@ -1760,7 +1870,9 @@
     }
 
     private var tabStrip: some View {
-      let stripHeight: CGFloat = solidChrome.isActive ? 40 : 37
+      // Paper’s 40-point strip includes its one-point bottom divider.
+      let stripHeight: CGFloat = solidChrome.isActive ? 39 : 37
+      let capsuleOutset = solidChrome.isActive ? NoteTabInk.solidCapsuleOutset : 0
       return ScrollViewReader { scrollProxy in
         GeometryReader { proxy in
           let hasOverflow = TabOverflowPresentation.overflows(
@@ -1784,7 +1896,10 @@
                   selectedColor: visibleNotes.first(where: {
                     $0.id == appState.workspace.selectedNoteID
                   }).map { Color(nsColor: selectedTabCapsuleFill(for: $0)) },
-                  reduceMotion: reduceMotion
+                  hoverColor: solidChrome.isActive
+                    ? Color.primary.opacity(theme.increasedContrast ? 0.18 : 0.08) : nil,
+                  reduceMotion: reduceMotion,
+                  capsuleOutset: capsuleOutset
                 ) {
                 HStack(spacing: 6) {
                 ForEach(visibleNotes) { note in
@@ -1814,14 +1929,15 @@
               .background {
                 if note.id != appState.workspace.selectedNoteID, note.tabColorHex != nil {
                   Capsule()
+                    .inset(by: -capsuleOutset)
                     .fill(tabColor(for: note, opacity: 0.10))
                 }
               }
             }
             .buttonStyle(.plain)
             .fleckHoverFill(
-              in: Capsule(),
-              isAllowed: note.id != appState.workspace.selectedNoteID
+              in: Capsule().inset(by: -capsuleOutset),
+              isAllowed: !solidChrome.isActive && note.id != appState.workspace.selectedNoteID
             )
             .accessibilityIdentifier("note-tab-\(note.id.uuidString)")
             .modifier(ReorderDragSource(begin: {
@@ -1925,39 +2041,39 @@
                 tabColorPickerNoteID = note.id
               }
               .accessibilityValue(tabColorAccessibilityValue(for: note.tabColorHex))
-              Button(AgentCapabilityPresentation.manageAgentAccessTitle) {
-                guard isNoteVisible(note.id) else { return }
-                notePendingAgentShare = note
-              }
               Divider()
               Button("Move to Trash", systemImage: "trash", role: .destructive) {
                 requestDeletion(note)
               }
             }
-            .popover(
+            .notesAnchoredPanel(
               isPresented: Binding(
                 get: { tabColorPickerNoteID == note.id },
                 set: { if !$0 { tabColorPickerNoteID = nil } }
               ),
-              arrowEdge: .bottom
+              chrome: solidChrome,
+              theme: theme,
+              nativeEdge: .bottom
             ) {
               tabColorPicker(noteID: note.id)
-                .fleckPopoverTheme(theme)
             }
                 }
               }
-              .padding(.horizontal, 12)
+              .padding(.horizontal, solidChrome.isActive ? 13 : 12)
               .fixedSize(horizontal: true, vertical: false)
               .background {
                 TabStripContentWidthObserver { width in
                   tabStripContentWidth = width
                 }
               }
-              .padding(.top, solidChrome.isActive ? 2 : 0)
+              .padding(.top, solidChrome.isActive ? 1 : 0)
               .frame(height: stripHeight, alignment: solidChrome.isActive ? .top : .center)
               .animation(motion.spatial, value: visibleNotes.map(\.id))
               .frame(minWidth: tabViewportWidth, alignment: .leading)
               }
+              // The AppKit-hosted capsule otherwise sits three points below
+              // Paper's optically aligned position in this fixed-height rail.
+              .offset(y: solidChrome.isActive ? -3 : 0)
                 Color.clear
                   .frame(width: 0, height: 0)
                   .id(TabScrollTarget.trailing)
@@ -2239,41 +2355,36 @@
       )
     }
 
-    @ViewBuilder
     private var notesOptionsMenu: some View {
       let actions = notesOptionsActions
-      let label = notesHeaderIcon(systemName: "ellipsis.circle", paperGlyph: .options)
-        .frame(width: 28, height: 28)
-      if solidChrome.isActive {
-        NotesAnchoredMenu(
-          title: "Options", placement: .belowTrailing, width: 248,
-          actions: actions.map { entry in
-            entry.map { NotesMenuAction(title: $0.title, isEnabled: $0.isEnabled, perform: $0.perform) }
-          }, selection: solidChrome.popoverSelection
-        ) { label }
-        .help("Options")
-      } else {
-        Menu {
-          ForEach(actions.indices, id: \.self) { index in
-            if let action = actions[index] {
-              Button(action: action.perform) {
-                if let symbol = action.symbol {
-                  Label(action.title, systemImage: symbol)
-                } else {
-                  Text(action.title)
-                }
+      let noteID = visibleSelectedNote?.id
+      return Menu {
+        ForEach(actions.indices, id: \.self) { index in
+          if let action = actions[index] {
+            Button {
+              guard visibleSelectedNote?.id == noteID else { return }
+              action.perform()
+            } label: {
+              if let symbol = action.symbol {
+                Label(action.title, systemImage: symbol)
+              } else {
+                Text(action.title)
               }
-              .disabled(!action.isEnabled)
-            } else {
-              Divider()
             }
+            .disabled(!action.isEnabled)
+          } else {
+            Divider()
           }
-        } label: { label }
-        .menuStyle(.button)
-        .menuIndicator(.hidden)
-        .accessibilityLabel("Options")
-        .help("Options")
+        }
+      } label: {
+        notesHeaderIcon(systemName: "ellipsis.circle", paperGlyph: .options)
+          .frame(width: 28, height: 28)
+          .fleckHoverFill(in: RoundedRectangle(cornerRadius: 6), isAllowed: solidChrome.isActive)
       }
+      .menuStyle(.button)
+      .menuIndicator(.hidden)
+      .accessibilityLabel("Options")
+      .help("Options")
     }
 
     private var notesOptionsActions: [NotesMenuAction?] {
@@ -2298,24 +2409,15 @@
         NotesMenuAction(title: "Dictation History", symbol: "waveform") { isShowingDictationHistory = true },
         NotesMenuAction(title: "Agent Activity", symbol: "clock.arrow.circlepath") { isShowingAgentActivity = true },
       ]
-      if let note = visibleSelectedNote {
-        actions.append(NotesMenuAction(title: AgentCapabilityPresentation.manageAgentAccessTitle) {
-          notePendingAgentShare = note
-        })
-      }
       return actions
     }
 
     private func startExport(_ format: NoteExportFormat) {
       guard let note = visibleSelectedNote else { return }
-      let export = NoteExport(note: note, format: format)
-      exportDocument = NoteFileDocument(data: export.data)
-      exportFilename = export.suggestedFilename
-      switch format {
-      case .plainText: exportType = .plainText
-      case .markdown: exportType = NoteFileDocument.markdownContentType
-      case .richText: exportType = .rtf
-      }
+      let export = PreparedNoteFileExport(note: note, format: format)
+      exportDocument = export.document
+      exportFilename = export.filename
+      exportType = export.type
       isExporting = true
     }
 
@@ -2439,7 +2541,6 @@
         && !isImporting
         && !isExporting
         && !isShowingDictationHistory
-        && notePendingAgentShare == nil
     }
 
     private var preferredMenuPanelSize: CGSize {
@@ -2462,6 +2563,28 @@
       }
     }
 
+    private var agentActivityInboxButton: some View {
+      AgentActivityIndicator(presentation: appState.agentActivityIndicator, usesBell: true) {
+        isShowingActivityInbox.toggle()
+      }
+      .notesAnchoredPanel(isPresented: $isShowingActivityInbox, chrome: solidChrome, theme: theme) {
+        AgentActivityInboxView(
+          chrome: solidChrome,
+          onOpenHistory: {
+            isShowingActivityInbox = false
+            isShowingAgentActivity = true
+          },
+          onOpenNote: { noteID in
+            if activateNoteAndScope(noteID) {
+              isShowingActivityInbox = false
+            }
+          }
+        )
+        .environmentObject(appState)
+      }
+      .onDisappear { isShowingActivityInbox = false }
+    }
+
     private var agentActivitySheetPresentation: Binding<Bool> {
       Binding(
         get: { isPinned && isShowingAgentActivity },
@@ -2471,6 +2594,7 @@
 
     private var agentActivityContent: some View {
       AgentActivityView(
+        notesChrome: solidChrome.isActive ? solidChrome : nil,
         onOpenNote: { noteID in
           if activateNoteAndScope(noteID) {
             isShowingAgentActivity = false
@@ -2482,15 +2606,28 @@
     }
 
     private var agentActivityOverlay: some View {
-      ZStack {
+      let chrome = solidChrome
+      let shape = RoundedRectangle(cornerRadius: 14)
+      return ZStack {
         Color.black.opacity(0.28)
           .ignoresSafeArea()
           .accessibilityHidden(true)
 
         agentActivityContent
           .frame(maxWidth: 520, maxHeight: 400)
-          .fleckThemedSurface(cornerRadius: 14)
-          .clipShape(RoundedRectangle(cornerRadius: 14))
+          .background {
+            if !chrome.isActive {
+              RoundedRectangle(cornerRadius: 14, style: .continuous).fill(theme.color(.card))
+            }
+          }
+          .clipShape(shape)
+          .overlay {
+            if chrome.isActive {
+              shape.strokeBorder(chrome.outline, lineWidth: 1)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
+          }
           .shadow(radius: 20, y: 8)
           .accessibilityElement(children: .contain)
           .accessibilityLabel("Agent Activity")
@@ -2534,11 +2671,11 @@
 
     private func openNoteLink(_ noteID: UUID) {
       guard appState.workspace.notes.contains(where: { $0.id == noteID }) else {
-        appState.saveError = "Note unavailable"
+        appState.reportUnavailableNoteLink()
         return
       }
       guard activateNoteAndScope(noteID) else {
-        appState.saveError = "Note unavailable"
+        appState.reportUnavailableNoteLink()
         return
       }
       DispatchQueue.main.async {
@@ -2675,29 +2812,37 @@
     @ViewBuilder
     private var editor: some View {
       if let note = appState.selectedNote {
+        let showsFormattingBar = appState.preferences.showFormattingBar
+        let fileReferences = appState.selectedNoteFileReferences
+        let toolbarDirectlyAboveEditor = showsFormattingBar && isEditorVisible
+          && presentedAgentBannerOccurrence == nil && fileReferences.isEmpty
+        let editorTopPadding: CGFloat = solidChrome.isActive
+          ? (toolbarDirectlyAboveEditor ? 4 : 12) : 10
         VStack(spacing: 0) {
           if let mode = DictationShortcutHelpMode.resolve(
             isReady: modifierShortcutPresentation.isReady,
             isCaptureActive: dictationRuntime.canCancel,
             showsGuide: appState.preferences.showDictationShortcutGuide
           ) {
-            DictationShortcutHelpRow(
-              mode: mode,
-              presentation: modifierShortcutPresentation,
-              destinationCopy: dictationRuntime.destinationGuidanceCopy,
-              onRecovery: {
-                Task { @MainActor in
-                  await dictationRuntime.performModifierShortcutRecovery {
-                    dictationRuntime.openSystemSettings($0)
-                  }
-                }
-              },
-              onDismissGuide: {
-                appState.updatePreferences { $0.showDictationShortcutGuide = false }
+            if solidChrome.isActive, mode == .recovery {
+              if modifierShortcutPresentation.recoveryAction != .enableInputMonitoring
+                || !dictationRuntime.isInputMonitoringNoticeDismissed
+              {
+                paperModifierShortcutRecovery
               }
-            )
+            } else {
+              DictationShortcutHelpRow(
+                mode: mode,
+                presentation: modifierShortcutPresentation,
+                destinationCopy: dictationRuntime.destinationGuidanceCopy,
+                onRecovery: performShortcutRecovery,
+                onDismissGuide: {
+                  appState.updatePreferences { $0.showDictationShortcutGuide = false }
+                }
+              )
+            }
           }
-          if appState.preferences.showFormattingBar {
+          if showsFormattingBar {
             FormattingBar(
               appState: appState,
               commands: editorCommands,
@@ -2705,6 +2850,7 @@
               isPinned: isPinned,
               isEditorVisible: isEditorVisible,
               isTitleFocused: editorFocus == .title,
+              windowReserve: menuPanelResizePaintInsets,
               onDelete: {
                 if let note = visibleSelectedNote {
                   requestDeletion(note)
@@ -2717,14 +2863,14 @@
                 removal: .move(edge: .top).combined(with: .opacity)
               )
             )
-            .animation(reduceMotion ? nil : motion.quick, value: appState.preferences.showFormattingBar)
+            .animation(reduceMotion ? nil : motion.quick, value: showsFormattingBar)
           }
           if solidChrome.isActive && isEditorVisible {
-            agentUpdateBanner.padding(.top, appState.preferences.showFormattingBar ? 6 : 0)
+            agentUpdateBanner.padding(.top, showsFormattingBar ? 12 : 0)
           }
-          if !appState.selectedNoteFileReferences.isEmpty {
+          if !fileReferences.isEmpty {
             NoteFileReferenceView(
-              references: appState.selectedNoteFileReferences,
+              references: fileReferences,
               canAdd: appState.canAddFileReference(noteID: note.id),
               onAdd: { chooseFile(for: note.id) },
               onOpen: openFileReference,
@@ -2800,7 +2946,7 @@
               }
             },
             onOpenNoteLink: openNoteLink,
-            onUnavailableNoteLink: { appState.saveError = "Note unavailable" }
+            onUnavailableNoteLink: appState.reportUnavailableNoteLink
           )
           .focused($editorFocus, equals: .body)
           .background(
@@ -2820,7 +2966,7 @@
           }
           .id(note.id)
           .padding(.leading, solidChrome.isActive ? 1 : 0)
-          .padding(.top, solidChrome.isActive ? 12 : 10)
+          .padding(.top, editorTopPadding)
           .padding(.bottom, solidChrome.isActive ? 8 : 10)
         }
       }
@@ -3029,7 +3175,7 @@
     }
 
     var body: some View {
-      HStack(spacing: 4) {
+      HStack(spacing: solidChrome.isActive ? 3 : 4) {
         folderNavigationLayer
           .frame(maxWidth: .infinity)
           .frame(height: folderNavigatorMaxHeight)
@@ -3053,7 +3199,7 @@
             folderComposer
               .frame(
                 width: isCreatingFolder ? maskPresentation.composerWidth : 28,
-                alignment: .leading
+                alignment: solidChrome.isActive && !isCreatingFolder ? .trailing : .leading
               )
           }
           .background {
@@ -3072,6 +3218,7 @@
         }
 
         trashRow
+          .padding(.leading, solidChrome.isActive ? 1 : 0)
       }
       .coordinateSpace(name: "folder-navigator-band")
       .onPreferenceChange(FolderContentWidthKey.self) { folderContentWidth = $0 }
@@ -3096,7 +3243,8 @@
         }
       }
       .padding(.horizontal, 12)
-      .padding(.vertical, solidChrome.isActive ? 3 : 5)
+      .padding(.top, solidChrome.isActive ? 4 : 5)
+      .padding(.bottom, solidChrome.isActive ? 3 : 5)
       .onMoveCommand { direction in
         guard !isFolderTextInputActive else { return }
         moveFocus(direction)
@@ -3235,9 +3383,15 @@
         Button {
           beginNewFolder(source: currentInteractionSource)
         } label: {
-          Image(systemName: "folder.badge.plus")
-            .frame(width: 28, height: 28)
-            .contentShape(Rectangle())
+          Group {
+            if solidChrome.isActive {
+              NotesPaperIcon(glyph: .newFolder)
+            } else {
+              Image(systemName: "folder.badge.plus")
+            }
+          }
+          .frame(width: solidChrome.isActive ? 26 : 28, height: solidChrome.isActive ? 26 : 28)
+          .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .fleckHoverFill(in: RoundedRectangle(cornerRadius: 5))
@@ -3476,6 +3630,7 @@
         rowLabel(
           name: "Trash",
           systemImage: "trash",
+          paperGlyph: .folderTrash,
           count: appState.trashedNotes.count,
           isSelected: false,
           isEmpty: appState.trashedNotes.isEmpty,
@@ -3509,6 +3664,7 @@
           rowLabel(
             name: "Unfiled",
             systemImage: "tray",
+            paperGlyph: .inbox,
             count: unfiledNotes.count,
             isSelected: activeFolderID == nil,
             isEmpty: unfiledNotes.isEmpty,
@@ -3590,6 +3746,7 @@
           rowLabel(
             name: folder.name,
             systemImage: "folder",
+            paperGlyph: .folder,
             count: appState.visibleNotes(in: folder.id).count,
             isSelected: activeFolderID == folder.id,
             isEmpty: appState.visibleNotes(in: folder.id).isEmpty,
@@ -3674,6 +3831,7 @@
     private func rowLabel(
       name: String,
       systemImage: String,
+      paperGlyph: NotesPaperIcon.Glyph,
       count: Int,
       isSelected: Bool,
       isEmpty: Bool,
@@ -3682,9 +3840,14 @@
       showsName: Bool = true,
       revealsName: Bool = false
     ) -> some View {
+      let isSolidTrash = solidChrome.isActive && paperGlyph == .folderTrash
       HStack(spacing: 7) {
-        Image(systemName: systemImage)
-          .frame(width: 18)
+        if solidChrome.isActive {
+          NotesPaperIcon(glyph: paperGlyph)
+        } else {
+          Image(systemName: systemImage)
+            .frame(width: 18)
+        }
         if revealsName {
           if showsName || !solidChrome.isActive {
             HStack(spacing: 0) {
@@ -3701,13 +3864,15 @@
         } else {
           Text(name)
             .lineLimit(1)
+            .padding(.trailing, isSolidTrash ? 10 : 0)
           if !solidChrome.isActive { Spacer(minLength: 4) }
         }
         Text(count, format: .number)
           .font(uiFont.font(.caption).monospacedDigit())
           .foregroundStyle(theme.color(.caption))
       }
-      .padding(.horizontal, 8)
+      .padding(.leading, isSolidTrash ? 7 : 8)
+      .padding(.trailing, 8)
       .padding(.vertical, solidChrome.isActive ? 0 : 5)
       .frame(minHeight: solidChrome.isActive ? 27 : 24)
       .background(
@@ -4424,6 +4589,12 @@
   private struct FormattingBar: View {
     private static let overflowableItems = Array(FormattingToolbarItem.allCases.dropLast())
 
+    private enum PopoverOwner: Equatable {
+      case toolbar
+      case more
+      case control(FormattingToolbarItem)
+    }
+
     private enum PresentedPopover: Identifiable, Equatable {
       case overflow([FormattingToolbarItem])
       case font
@@ -4449,6 +4620,21 @@
       }
     }
 
+    private enum FontSizeField: Hashable {
+      case direct
+      case overflow(UUID?)
+    }
+
+    private struct SolidFontSizeEdit {
+      let id = UUID()
+      let field: FontSizeField
+      let noteID: UUID
+      let revision: UInt64
+      let editorGeneration: UInt64
+      let selection: NSRange
+      var text: String?
+    }
+
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.fleckThemeSnapshot) private var theme
     @ObservedObject var appState: AppState
@@ -4457,20 +4643,21 @@
     let isPinned: Bool
     let isEditorVisible: Bool
     let isTitleFocused: Bool
+    let windowReserve: EdgeInsets
     let onDelete: () -> Void
     @State private var fontPickerTarget: FontPickerTarget?
     @State private var fontPickerIsSearching = false
     @State private var fontSizeText = ""
     @State private var hasUncommittedFontSizeEdit = false
     @State private var isFontSizeHovered = false
-    @FocusState private var isFontSizeFocused: Bool
+    @FocusState private var focusedFontSizeField: FontSizeField?
     @State private var fontSizePickerNoteID: UUID?
+    @State private var solidFontSizeEdit: SolidFontSizeEdit?
     @State private var webLinkTarget: EditorWebLinkTarget?
     @State private var presentedPopover: PresentedPopover?
-    @State private var hoveredOverflowItem: FormattingToolbarItem?
+    @State private var popoverOwner: PopoverOwner = .toolbar
+    @State private var requestAfterOverflow: (() -> Void)?
     @State private var selectedVisibleCount: Int?
-    @State private var directFontFrame: CGRect = .null
-    @State private var overflowFrame: CGRect = .null
 
     private var solidChrome: NotesSolidChrome {
       NotesSolidChrome(theme: theme, appearance: appState.preferences.chromeAppearance)
@@ -4487,9 +4674,11 @@
         onVisibleCountChange: { count in
           guard selectedVisibleCount != count else { return }
           selectedVisibleCount = count
-          if case .overflow = presentedPopover { presentedPopover = nil }
-        },
-        trailingOverflowGeometry: ("formattingBar", { overflowFrame = $0 })
+          requestAfterOverflow = nil
+          if popoverOwner == .more || presentedPopover?.isOverflow == true {
+            presentedPopover = nil
+          }
+        }
       ) { index, measuring in
         let item = Self.overflowableItems[index]
         HStack(spacing: solidChrome.isActive ? 2 : 8) {
@@ -4504,8 +4693,11 @@
           }
           directItem(item, measuring: measuring)
         }
-      } overflow: { range in
-        overflowMenu(items: Array(Self.overflowableItems[range]))
+      } overflow: { range, measuring in
+        formattingPopover(
+          .more, attachedTo: overflowMenu(items: Array(Self.overflowableItems[range])),
+          measuring: measuring
+        )
       } trailing: { measuring in
         HStack(spacing: solidChrome.isActive ? 2 : 8) {
           if solidChrome.isActive { compactSeparator.padding(.horizontal, 5) }
@@ -4522,45 +4714,76 @@
       .frame(height: solidChrome.isActive ? 36 : 44)
       .frame(maxWidth: .infinity)
       .modifier(FormattingBarSurface(isPinned: isPinned))
-      .padding(.horizontal, 10)
-      .padding(.top, solidChrome.isActive ? 7 : 8)
+      .padding(solidChrome.isActive
+        ? solidChrome.windowEdgePadding(horizontal: 11, after: windowReserve)
+        : EdgeInsets(top: 0, leading: 10, bottom: 0, trailing: 10))
+      .padding(.top, solidChrome.isActive ? 6 : 8)
       .disabled(!isEditorVisible)
       .focusEffectDisabled(!solidChrome.isActive)
       .accessibilityElement(children: .contain)
       .accessibilityLabel("Editor toolbar")
       .accessibilityHidden(!isEditorVisible)
-      .coordinateSpace(.named("formattingBar"))
-      .popover(item: $presentedPopover, attachmentAnchor: popoverAnchor, arrowEdge: .bottom) { popover in
+      .popover(item: popoverBinding(for: .toolbar), arrowEdge: .bottom) { popover in
         popoverContent(popover)
           .fleckPopoverTheme(theme)
       }
       .onAppear(perform: syncFontSizeText)
       .onChange(of: commands.currentFontSize) { _, _ in syncFontSizeText() }
       .onChange(of: commands.isFontSizeMixed) { _, _ in syncFontSizeText() }
-      .onChange(of: appState.selectedNote) { _, _ in
+      .onChange(of: appState.selectedNote) { oldNote, newNote in
+        if solidChrome.isActive && oldNote?.id != newNote?.id {
+          requestAfterOverflow = nil
+          presentedPopover = nil
+        }
         dismissInvalidFontPicker()
         dismissInvalidFontSizePicker()
         dismissWebLinkEditor()
       }
-      .onChange(of: isEditorVisible) { _, _ in
+      .onChange(of: isEditorVisible) { _, isVisible in
+        if solidChrome.isActive && !isVisible {
+          requestAfterOverflow = nil
+          presentedPopover = nil
+        }
         dismissInvalidFontPicker()
         dismissInvalidFontSizePicker()
         dismissWebLinkEditor()
       }
       .onChange(of: presentedPopover) { oldPopover, newPopover in
+        if oldPopover?.isOverflow == true, newPopover == nil, let request = requestAfterOverflow {
+          requestAfterOverflow = nil
+          let visibleCount = selectedVisibleCount
+          DispatchQueue.main.async {
+            guard presentedPopover == nil, selectedVisibleCount == visibleCount, isEditorVisible,
+              solidChrome.isActive
+            else { return }
+            request()
+          }
+        }
         if oldPopover == .font, newPopover != .font {
           fontPickerTarget = nil
           fontPickerIsSearching = false
         }
         if oldPopover == .fontSize, newPopover != .fontSize { fontSizePickerNoteID = nil }
         if oldPopover == .webLink, newPopover != .webLink { webLinkTarget = nil }
-        if newPopover?.isOverflow != true { hoveredOverflowItem = nil }
       }
       .onChange(of: commands.areBodyCommandsBlocked) { _, blocked in
         guard blocked else { return }
-        isFontSizeFocused = false
+        if !solidChrome.isActive { focusedFontSizeField = nil }
         webLinkTarget?.cancel()
         if presentedPopover == .webLink { presentedPopover = nil }
+      }
+      .onChange(of: bodyCommandDisabled) { _, _ in
+        if solidChrome.isActive { dismissInvalidFontSizePicker() }
+      }
+      .onChange(of: fontSizeIsDirect) { _, _ in
+        if solidChrome.isActive { dismissInvalidFontSizePicker() }
+      }
+      .onChange(of: solidChrome.isActive) { _, isSolid in
+        requestAfterOverflow = nil
+        presentedPopover = nil
+        guard !isSolid, let edit = solidFontSizeEdit else { return }
+        discardSolidFontSize(edit.field)
+        syncFontSizeText()
       }
     }
 
@@ -4571,26 +4794,36 @@
         .accessibilityHidden(true)
     }
 
-    private var popoverAnchor: PopoverAttachmentAnchor {
-      guard solidChrome.isActive else { return .rect(.bounds) }
-      switch presentedPopover {
-      case .font where !directFontFrame.isEmpty:
-        return .rect(.rect(CGRect(
-          x: directFontFrame.minX, y: directFontFrame.minY,
-          width: 280, height: directFontFrame.height
-        )))
-      case .overflow where !overflowFrame.isEmpty:
-        return .rect(.rect(CGRect(
-          x: overflowFrame.maxX - 238, y: overflowFrame.minY,
-          width: 238, height: overflowFrame.height
-        )))
-      case .webLink where !overflowFrame.isEmpty:
-        return .rect(.rect(CGRect(
-          x: overflowFrame.maxX - 320, y: overflowFrame.minY - 31,
-          width: 344, height: overflowFrame.height
-        )))
-      default:
-        return .rect(.bounds)
+    private func showPopover(_ popover: PresentedPopover, from owner: PopoverOwner) {
+      popoverOwner = solidChrome.isActive ? owner : .toolbar
+      presentedPopover = popover
+    }
+
+    private func popoverBinding(for owner: PopoverOwner) -> Binding<PresentedPopover?> {
+      Binding {
+        popoverOwner == owner ? presentedPopover : nil
+      } set: {
+        if popoverOwner == owner { presentedPopover = $0 }
+      }
+    }
+
+    @ViewBuilder
+    private func formattingPopover<Trigger: View>(
+      _ owner: PopoverOwner, attachedTo trigger: Trigger, measuring: Bool
+    ) -> some View {
+      if solidChrome.isActive && !measuring {
+        trigger.background {
+          NotesAnchoredPanel(item: popoverBinding(for: owner), chrome: solidChrome, theme: theme) { popover in
+            popoverContent(popover)
+          }
+          .allowsHitTesting(false)
+          .accessibilityHidden(true)
+        }
+        .onDisappear {
+          if popoverOwner == owner { presentedPopover = nil }
+        }
+      } else {
+        trigger
       }
     }
 
@@ -4604,7 +4837,9 @@
           guard isEditorVisible else { return }
           commands.undo()
         } label: {
-          ToolbarIconLabel(systemImage: "arrow.uturn.backward")
+          ToolbarIconLabel(
+            systemImage: "arrow.uturn.backward", paperGlyph: solidChrome.isActive ? .undo : nil
+          )
         }
         .accessibilityLabel("Undo")
         .keyboardShortcut(measuring ? nil : KeyboardShortcut("z"))
@@ -4614,7 +4849,9 @@
           guard isEditorVisible else { return }
           commands.redo()
         } label: {
-          ToolbarIconLabel(systemImage: "arrow.uturn.forward")
+          ToolbarIconLabel(
+            systemImage: "arrow.uturn.forward", paperGlyph: solidChrome.isActive ? .redo : nil
+          )
         }
         .accessibilityLabel("Redo")
         .keyboardShortcut(measuring ? nil : KeyboardShortcut("z", modifiers: [.command, .shift]))
@@ -4624,7 +4861,10 @@
           guard isEditorVisible else { return }
           commands.toggleBold()
         } label: {
-          ToolbarIconLabel(systemImage: "bold", isActive: commands.isBold)
+          ToolbarIconLabel(
+            systemImage: "bold", isActive: commands.isBold,
+            paperGlyph: solidChrome.isActive ? .bold : nil
+          )
         }
         .accessibilityLabel("Bold")
         .accessibilityValue(
@@ -4637,7 +4877,10 @@
           guard isEditorVisible else { return }
           commands.toggleItalic()
         } label: {
-          ToolbarIconLabel(systemImage: "italic", isActive: commands.isItalic)
+          ToolbarIconLabel(
+            systemImage: "italic", isActive: commands.isItalic,
+            paperGlyph: solidChrome.isActive ? .italic : nil
+          )
         }
         .accessibilityLabel("Italic")
         .accessibilityValue(
@@ -4650,7 +4893,10 @@
           guard isEditorVisible else { return }
           commands.toggleUnderline()
         } label: {
-          ToolbarIconLabel(systemImage: "underline", isActive: commands.isUnderlined)
+          ToolbarIconLabel(
+            systemImage: "underline", isActive: commands.isUnderlined,
+            paperGlyph: solidChrome.isActive ? .underline : nil
+          )
         }
         .accessibilityLabel("Underline")
         .accessibilityValue(
@@ -4663,7 +4909,10 @@
           guard isEditorVisible else { return }
           commands.toggleStrikethrough()
         } label: {
-          ToolbarIconLabel(systemImage: "strikethrough", isActive: commands.isStrikethrough)
+          ToolbarIconLabel(
+            systemImage: "strikethrough", isActive: commands.isStrikethrough,
+            paperGlyph: solidChrome.isActive ? .strikethrough : nil
+          )
         }
         .accessibilityLabel("Strikethrough")
         .accessibilityValue(
@@ -4674,7 +4923,7 @@
         )
         .disabled(bodyCommandDisabled)
       case .font:
-        fontButton(measuring: measuring)
+        formattingPopover(.control(.font), attachedTo: fontButton, measuring: measuring)
       case .fontSize:
         if measuring {
           Color.clear.frame(width: fontSizeFieldWidth, height: 0)
@@ -4682,9 +4931,9 @@
           fontSizeField().disabled(bodyCommandDisabled)
         }
       case .fontColor:
-        foregroundColorButton
+        formattingPopover(.control(.fontColor), attachedTo: foregroundColorButton, measuring: measuring)
       case .highlight:
-        backgroundColorButton
+        formattingPopover(.control(.highlight), attachedTo: backgroundColorButton, measuring: measuring)
       case .bullets:
         bulletsButton
       case .numbers:
@@ -4698,20 +4947,19 @@
         }
         .accessibilityLabel("Checklist")
         .disabled(bodyCommandDisabled)
-      case .textStyles:
-        textStyleMenu(iconOnly: true)
-      case .text:
-        textMenu(iconOnly: true)
-      case .paragraph:
-        paragraphMenu(iconOnly: true)
+      case .textStyles, .text, .paragraph:
+        directFormattingMenu(item)
       case .tools:
-        toolsInsertMenu(title: "Tools", iconOnly: true)
+        formattingPopover(
+          .control(.tools), attachedTo: toolsInsertMenu,
+          measuring: measuring
+        )
       case .delete:
         Button(role: .destructive) {
           guard isEditorVisible else { return }
           onDelete()
         } label: {
-          ToolbarIconLabel(systemImage: "trash")
+          ToolbarIconLabel(systemImage: "trash", paperGlyph: solidChrome.isActive ? .editorTrash : nil)
         }
         .accessibilityLabel("Delete")
         .keyboardShortcut(measuring || solidChrome.isActive ? nil : KeyboardShortcut("w"))
@@ -4728,7 +4976,8 @@
       } label: {
         ToolbarIconLabel(
           systemImage: dictationRuntime.microphoneSymbol,
-          isActive: dictationRuntime.isListening
+          isActive: dictationRuntime.isListening,
+          paperGlyph: solidChrome.isActive && !dictationRuntime.isListening ? .microphone : nil
         )
       } primaryAction: {
         performDictationPrimaryAction()
@@ -4741,15 +4990,19 @@
       .help(dictationRuntime.microphoneHelp)
     }
 
-    private func fontButton(measuring: Bool) -> some View {
-      Button(action: presentFontPicker) {
+    private var fontButton: some View {
+      Button { presentFontPicker(from: .control(.font)) } label: {
         HStack(spacing: 5) {
           Text(fontFamilyDisplay).lineLimit(1).truncationMode(.tail)
-          if solidChrome.isActive { Spacer(minLength: 4) }
-          Image(systemName: "chevron.down").font(.system(size: 8))
-            .accessibilityHidden(true)
+          if solidChrome.isActive {
+            Spacer(minLength: 4)
+            NotesPaperIcon(glyph: .fontDisclosure)
+          } else {
+            Image(systemName: "chevron.down").font(.system(size: 8))
+              .accessibilityHidden(true)
+          }
         }
-        .font(solidChrome.isActive ? .system(size: 12, weight: .medium) : nil)
+        .font(solidChrome.isActive ? .system(size: 12) : nil)
         .padding(.horizontal, solidChrome.isActive ? 8 : 0)
         .frame(width: solidChrome.isActive ? 110 : 112, height: solidChrome.isActive ? 28 : nil)
         .background(
@@ -4761,20 +5014,14 @@
       .help("Font: \(fontFamilyDisplay)")
       .accessibilityLabel("Font")
       .accessibilityValue(fontFamilyDisplay)
-      .onGeometryChange(for: CGRect.self) { proxy in
-        measuring ? .null : proxy.frame(in: .named("formattingBar"))
-      } action: { frame in
-        if !measuring { directFontFrame = frame }
-      }
-      .onDisappear { if !measuring { directFontFrame = .null } }
     }
 
     private var foregroundColorButton: some View {
       Button {
         guard isEditorVisible else { return }
-        presentedPopover = .foregroundColor
+        showPopover(.foregroundColor, from: .control(.fontColor))
       } label: {
-        ToolbarIconLabel(systemImage: "paintpalette")
+        ToolbarIconLabel(systemImage: "paintpalette", paperGlyph: solidChrome.isActive ? .palette : nil)
       }
       .accessibilityLabel("Font Color")
       .accessibilityValue(
@@ -4790,7 +5037,7 @@
     private var backgroundColorButton: some View {
       Button {
         guard isEditorVisible else { return }
-        presentedPopover = .backgroundColor
+        showPopover(.backgroundColor, from: .control(.highlight))
       } label: {
         if solidChrome.isActive {
           NotesPaperIcon(
@@ -4819,7 +5066,7 @@
 
     private var bulletsButton: some View {
       Menu {
-        bulletMenuItems(includeAutomatic: false)
+        NotesNativeMenuItems(items: listMenuItems(.bullets, includeAutomatic: false))
       } label: {
         ToolbarIconLabel(systemImage: "list.bullet", paperGlyph: solidChrome.isActive ? .bullets : nil)
       } primaryAction: {
@@ -4832,7 +5079,7 @@
 
     private var numbersButton: some View {
       Menu {
-        numberMenuItems(includeAutomatic: false)
+        NotesNativeMenuItems(items: listMenuItems(.numbers, includeAutomatic: false))
       } label: {
         ToolbarIconLabel(systemImage: "list.number", paperGlyph: solidChrome.isActive ? .numbers : nil)
       } primaryAction: {
@@ -4843,68 +5090,51 @@
       .disabled(bodyCommandDisabled)
     }
 
+    private var isMorePopoverOpen: Bool {
+      presentedPopover?.isOverflow == true
+        || (solidChrome.isActive && popoverOwner == .more && presentedPopover != nil)
+    }
+
     private func overflowMenu(items: [FormattingToolbarItem]) -> some View {
       Button {
-        presentedPopover = presentedPopover == .overflow(items) ? nil : .overflow(items)
+        if isMorePopoverOpen { presentedPopover = nil }
+        else { showPopover(.overflow(items), from: .more) }
       } label: {
         FormattingOverflowLabel()
           .background {
-            if solidChrome.isActive && presentedPopover == .overflow(items) {
+            if solidChrome.isActive && isMorePopoverOpen {
               RoundedRectangle(cornerRadius: 5)
                 .fill(solidChrome.popoverSelection)
             }
           }
       }
       .accessibilityLabel("More formatting")
+      .onKeyPress(.downArrow) {
+        guard solidChrome.isActive, isEditorVisible, !isMorePopoverOpen else { return .ignored }
+        showPopover(.overflow(items), from: .more)
+        return .handled
+      }
     }
 
     @ViewBuilder
     private func popoverContent(_ popover: PresentedPopover) -> some View {
       switch popover {
       case .overflow(let items):
-        VStack(alignment: .leading, spacing: solidChrome.isActive ? 0 : 6) {
-          ForEach(items) { item in
-            if item != items.first,
-              solidChrome.isActive ? item == .tools : item.hasSeparatorBefore
-            {
-              if solidChrome.isActive {
-                Rectangle().fill(solidChrome.popoverSeparator)
-                  .frame(height: 1)
-                  .padding(.horizontal, 7)
-                  .padding(.vertical, 5)
-                  .accessibilityHidden(true)
-              } else {
-                Divider()
-              }
-            }
-            if solidChrome.isActive {
-              overflowItem(item)
-                .menuIndicator([.textStyles, .text, .paragraph, .tools].contains(item) ? .hidden : .automatic)
-                .frame(maxWidth: .infinity, minHeight: 29, alignment: .leading)
-                .background(
-                  hoveredOverflowItem == item ? solidChrome.popoverSelection : .clear,
-                  in: RoundedRectangle(cornerRadius: 5, style: .circular)
-                )
-                .contentShape(Rectangle())
-                .onContinuousHover { phase in
-                  if case .active = phase { hoveredOverflowItem = item }
-                  else if hoveredOverflowItem == item { hoveredOverflowItem = nil }
-                }
-            } else {
-              overflowItem(item)
+        if solidChrome.isActive {
+          NotesFormattingCascade(items: overflowItems(items), chrome: solidChrome) {
+            presentedPopover = nil
+          }
+        } else {
+          VStack(alignment: .leading, spacing: 6) {
+            ForEach(items) { item in
+              if item != items.first, item.hasSeparatorBefore { Divider() }
+              NotesNativeMenuItem(item: overflowItem(item),
+                displayTitle: item == .textStyles ? commands.currentTextStyle?.rawValue : nil)
             }
           }
-        }
-        .buttonStyle(.plain)
-        .frame(minWidth: solidChrome.isActive ? nil : 180, alignment: .leading)
-        .frame(width: solidChrome.isActive ? 224 : nil, alignment: .leading)
-        .padding(solidChrome.isActive ? 7 : 10)
-        .background {
-          if solidChrome.isActive {
-            let shape = RoundedRectangle(cornerRadius: 10, style: .circular)
-            shape.strokeBorder(solidChrome.popoverOutline, lineWidth: 1)
-              .background(solidChrome.popoverSurface, in: shape)
-          }
+          .buttonStyle(.plain)
+          .frame(minWidth: 180, alignment: .leading)
+          .padding(10)
         }
       case .font:
         fontPickerContent
@@ -4919,399 +5149,280 @@
       }
     }
 
-    @ViewBuilder
-    private func overflowItem(_ item: FormattingToolbarItem) -> some View {
+    private func overflowItems(_ items: [FormattingToolbarItem]) -> [NotesCascadeItem?] {
+      items.flatMap { item in
+        let row = overflowItem(item)
+        return item == .tools && item != items.first ? [nil, row] : [row]
+      }
+    }
+
+    private func overflowItem(_ item: FormattingToolbarItem) -> NotesCascadeItem {
+      let enabled = !bodyCommandDisabled
       switch item {
       case .dictation:
-        Menu("Dictation") {
-          Button(dictationRuntime.microphoneHelp) {
+        return NotesCascadeItem("Dictation", icon: "waveform", isEnabled: isEditorVisible, items: [
+          NotesCascadeItem(dictationRuntime.microphoneHelp,
+            isEnabled: dictationRuntime.toolbarPresentation.primaryAction != nil) {
             presentedPopover = nil
             performDictationPrimaryAction()
-          }
-            .disabled(dictationRuntime.toolbarPresentation.primaryAction == nil)
-          Button("Cancel Dictation", role: .destructive) {
+          },
+          NotesCascadeItem("Cancel Dictation", isEnabled: dictationRuntime.canCancel, role: .destructive) {
             guard isEditorVisible else { return }
             presentedPopover = nil
             Task { await dictationRuntime.cancel() }
-          }
-          .disabled(!dictationRuntime.canCancel)
-        }
+          },
+        ])
       case .undo:
-        Button("Undo") { performOverflowAction { commands.undo() } }
-          .keyboardShortcut("z", modifiers: .command)
-          .disabled(!commands.canPerformEditorHistoryCommand)
+        return NotesCascadeItem("Undo", shortcut: KeyboardShortcut("z"),
+          isEnabled: commands.canPerformEditorHistoryCommand) {
+          performOverflowAction { commands.undo() }
+        }
       case .redo:
-        Button("Redo") { performOverflowAction { commands.redo() } }
-          .keyboardShortcut("z", modifiers: [.command, .shift])
-          .disabled(!commands.canPerformEditorHistoryCommand)
+        return NotesCascadeItem("Redo", shortcut: KeyboardShortcut("z", modifiers: [.command, .shift]),
+          isEnabled: commands.canPerformEditorHistoryCommand) {
+          performOverflowAction { commands.redo() }
+        }
       case .bold:
-        Button("Bold") { performOverflowAction { commands.toggleBold() } }
-          .accessibilityValue(
-            formattingStateValue(isOn: commands.isBold, isMixed: commands.isBoldMixed)
-          )
-          .keyboardShortcut("b", modifiers: .command)
-          .disabled(bodyCommandDisabled)
+        return NotesCascadeItem("Bold", value: formattingStateValue(isOn: commands.isBold, isMixed: commands.isBoldMixed),
+          shortcut: KeyboardShortcut("b"), isEnabled: enabled) {
+          performOverflowAction { commands.toggleBold() }
+        }
       case .italic:
-        Button("Italic") { performOverflowAction { commands.toggleItalic() } }
-          .accessibilityValue(
-            formattingStateValue(isOn: commands.isItalic, isMixed: commands.isItalicMixed)
-          )
-          .keyboardShortcut("i", modifiers: .command)
-          .disabled(bodyCommandDisabled)
+        return NotesCascadeItem("Italic",
+          value: formattingStateValue(isOn: commands.isItalic, isMixed: commands.isItalicMixed),
+          shortcut: KeyboardShortcut("i"), isEnabled: enabled) {
+          performOverflowAction { commands.toggleItalic() }
+        }
       case .underline:
-        Button("Underline") { performOverflowAction { commands.toggleUnderline() } }
-          .accessibilityValue(
-            formattingStateValue(isOn: commands.isUnderlined, isMixed: commands.isUnderlineMixed)
-          )
-          .keyboardShortcut("u", modifiers: .command)
-          .disabled(bodyCommandDisabled)
+        return NotesCascadeItem("Underline",
+          value: formattingStateValue(isOn: commands.isUnderlined, isMixed: commands.isUnderlineMixed),
+          shortcut: KeyboardShortcut("u"), isEnabled: enabled) {
+          performOverflowAction { commands.toggleUnderline() }
+        }
       case .strikethrough:
-        Button("Strikethrough") {
+        return NotesCascadeItem("Strikethrough",
+          value: formattingStateValue(isOn: commands.isStrikethrough, isMixed: commands.isStrikethroughMixed),
+          isEnabled: enabled) {
           performOverflowAction { commands.toggleStrikethrough() }
         }
-        .accessibilityValue(
-          formattingStateValue(
-            isOn: commands.isStrikethrough,
-            isMixed: commands.isStrikethroughMixed
-          )
-        )
-        .disabled(bodyCommandDisabled)
       case .font:
-        Button("Font…") { presentOverflowPicker(presentFontPicker) }
-          .accessibilityLabel("Font")
-          .accessibilityValue(fontFamilyDisplay)
+        return NotesCascadeItem("Font…", accessibilityLabel: "Font", value: fontFamilyDisplay,
+          isEnabled: isEditorVisible) {
+          presentOverflowPicker { presentFontPicker(from: .more) }
+        }
       case .fontSize:
-        Button("Font Size…") { presentOverflowPicker(presentFontSizePicker) }
-          .accessibilityLabel("Font Size")
-          .accessibilityValue(commands.isFontSizeMixed ? "Mixed" : fontSizeDisplay)
-          .disabled(bodyCommandDisabled)
+        return NotesCascadeItem("Font Size…", accessibilityLabel: "Font Size",
+          value: commands.isFontSizeMixed ? "Mixed" : fontSizeDisplay, isEnabled: enabled,
+          perform: presentFontSizePicker)
       case .fontColor:
-        Button("Font Color…") {
-          presentOverflowPicker { presentedPopover = .foregroundColor }
+        return NotesCascadeItem("Font Color…", accessibilityLabel: "Font Color",
+          value: colorAccessibilityValue(color: commands.currentForegroundColor,
+            isMixed: commands.isForegroundColorMixed, emptyName: "Automatic"),
+          isEnabled: enabled) {
+          presentOverflowPicker { showPopover(.foregroundColor, from: .more) }
         }
-        .accessibilityLabel("Font Color")
-        .accessibilityValue(
-          colorAccessibilityValue(
-            color: commands.currentForegroundColor,
-            isMixed: commands.isForegroundColorMixed,
-            emptyName: "Automatic"
-          )
-        )
-        .disabled(bodyCommandDisabled)
       case .highlight:
-        Button("Highlight…") {
-          presentOverflowPicker { presentedPopover = .backgroundColor }
+        return NotesCascadeItem("Highlight…", accessibilityLabel: "Highlight",
+          value: colorAccessibilityValue(color: commands.currentBackgroundColor,
+            isMixed: commands.isBackgroundColorMixed, emptyName: "No Highlight"),
+          isEnabled: enabled) {
+          presentOverflowPicker { showPopover(.backgroundColor, from: .more) }
         }
-        .accessibilityLabel("Highlight")
-        .accessibilityValue(
-          colorAccessibilityValue(
-            color: commands.currentBackgroundColor,
-            isMixed: commands.isBackgroundColorMixed,
-            emptyName: "No Highlight"
-          )
-        )
-        .disabled(bodyCommandDisabled)
       case .bullets:
-        Menu("Bullets") { bulletMenuItems(includeAutomatic: true) }
+        return NotesCascadeItem("Bullets", icon: "list.bullet", isEnabled: enabled,
+          items: listMenuItems(.bullets, includeAutomatic: true))
       case .numbers:
-        Menu("Numbers") { numberMenuItems(includeAutomatic: true) }
+        return NotesCascadeItem("Numbers", icon: "list.number", isEnabled: enabled,
+          items: listMenuItems(.numbers, includeAutomatic: true))
       case .checklist:
-        Button("Checklist") {
+        return NotesCascadeItem("Checklist", isEnabled: enabled) {
           performOverflowAction { commands.applyList(.checklist) }
         }
-        .disabled(bodyCommandDisabled)
-      case .textStyles:
-        textStyleMenu(iconOnly: false)
-      case .text:
-        textMenu(iconOnly: false)
-      case .paragraph:
-        paragraphMenu(iconOnly: false)
+      case .textStyles, .text, .paragraph:
+        return formattingBranch(item, fromOverflow: true)
       case .tools:
-        toolsInsertMenu(title: "Tools / Insert", iconOnly: false)
+        return NotesCascadeItem("Tools / Insert", icon: "link", help: "Links and find tools",
+          isEnabled: enabled, items: toolsInsertActions(fromOverflow: true))
       case .delete:
-        Button("Delete", role: .destructive) {
+        return NotesCascadeItem("Delete", shortcut: solidChrome.isActive ? nil : KeyboardShortcut("w"),
+          isEnabled: enabled, role: .destructive) {
           performOverflowAction(onDelete)
         }
-        .keyboardShortcut(solidChrome.isActive ? nil : KeyboardShortcut("w"))
       }
     }
 
-    @ViewBuilder
-    private func bulletMenuItems(includeAutomatic: Bool) -> some View {
-      if includeAutomatic {
-        Button("Bulleted List") {
-          performListAction(fromOverflow: true) {
-            commands.applyAutomaticList(.bullets)
-          }
-        }
-        Divider()
-      }
-      Button("Disc (•)") {
-        performListAction(fromOverflow: includeAutomatic) { commands.applyList(.bullet(.disc)) }
-      }
-      Button("Circle (◦)") {
-        performListAction(fromOverflow: includeAutomatic) { commands.applyList(.bullet(.circle)) }
-      }
-      Button("Square (▪)") {
-        performListAction(fromOverflow: includeAutomatic) { commands.applyList(.bullet(.square)) }
-      }
-      Button("Dash (–)") {
-        performListAction(fromOverflow: includeAutomatic) { commands.applyList(.bullet(.dash)) }
-      }
-    }
-
-    @ViewBuilder
-    private func numberMenuItems(includeAutomatic: Bool) -> some View {
-      if includeAutomatic {
-        Button("Numbered List") {
-          performListAction(fromOverflow: true) {
-            commands.applyAutomaticList(.numbers)
-          }
-        }
-        Divider()
-      }
-      Button("Decimal (1.)") {
-        performListAction(fromOverflow: includeAutomatic) { commands.applyList(.number(.decimal)) }
-      }
-      Button("Alphabetic (a.)") {
-        performListAction(fromOverflow: includeAutomatic) { commands.applyList(.number(.alphabetic)) }
-      }
-      Button("Roman (i.)") {
-        performListAction(fromOverflow: includeAutomatic) { commands.applyList(.number(.roman)) }
-      }
-    }
-
-    private func textStyleMenu(iconOnly: Bool) -> some View {
-      Menu {
-        textStyleActions
-      } label: {
-        if iconOnly {
-          ToolbarIconLabel(systemImage: "textformat.size")
-        } else if solidChrome.isActive {
-          notesSubmenuLabel("Text Style", systemImage: "text.book.closed")
-        } else {
-          Text(commands.currentTextStyle?.rawValue ?? "Text Style")
+    private func listMenuItems(_ family: EditorListFamily, includeAutomatic: Bool) -> [NotesCascadeItem?] {
+      let variants: [(String, EditorListStyle)] = family == .bullets
+        ? [("Disc (•)", .bullet(.disc)), ("Circle (◦)", .bullet(.circle)),
+          ("Square (▪)", .bullet(.square)), ("Dash (–)", .bullet(.dash))]
+        : [("Decimal (1.)", .number(.decimal)), ("Alphabetic (a.)", .number(.alphabetic)),
+          ("Roman (i.)", .number(.roman))]
+      let styles = variants.map { label, style in
+        NotesCascadeItem(label) {
+          performListAction(fromOverflow: includeAutomatic) { commands.applyList(style) }
         }
       }
-      .menuIndicator(.automatic)
-      .disabled(bodyCommandDisabled)
-      .accessibilityLabel("Text Style")
-      .accessibilityValue(commands.currentTextStyle?.rawValue ?? "Mixed or custom")
-      .help("Apply durable visual paragraph styling")
-    }
-
-    @ViewBuilder private var textStyleActions: some View {
-      ForEach(EditorTextStyle.allCases, id: \.self) { style in
-        Button {
-          _ = commands.applyTextStyle(style)
-        } label: {
-          menuStateLabel(style.rawValue, selected: commands.currentTextStyle == style)
-        }
-      }
-    }
-
-    private func textMenu(iconOnly: Bool) -> some View {
-      Menu {
-        Button("Clear Text Formatting") { _ = commands.clearTextFormatting() }
-        Divider()
-        Button("Copy Formatting") { _ = commands.copyFormatting() }
-          .help("Copies the first selected run's visual formatting without using the clipboard.")
-        Button("Paste Formatting") { _ = commands.pasteFormatting() }
-          .disabled(!commands.canPasteFormatting)
-        Button("Cancel Copied Formatting") { commands.cancelCopiedFormatting() }
-          .disabled(!commands.canPasteFormatting)
-        Divider()
-        baselineMenu
-        caseMenu
-      } label: {
-        if iconOnly {
-          FormattingMenuIconLabel(systemImage: "textformat.alt")
-        } else if solidChrome.isActive {
-          notesSubmenuLabel("Text", systemImage: "bold")
-        } else {
-          Text("Text")
-        }
-      }
-      .menuIndicator(iconOnly ? .hidden : .automatic)
-      .disabled(bodyCommandDisabled)
-      .accessibilityLabel("Text")
-      .help("Text formatting")
-    }
-
-    private func paragraphMenu(iconOnly: Bool) -> some View {
-      Menu {
-        Menu(commands.isAlignmentMixed ? "Alignment (Mixed)" : "Alignment") {
-          alignmentButton("Left", .left)
-          alignmentButton("Center", .center)
-          alignmentButton("Right", .right)
-          alignmentButton("Justified", .justified)
-        }
-        Menu(
-          commands.currentLineSpacing == nil
-            ? "Line Spacing (Mixed or Custom)" : "Line Spacing"
-        ) {
-          ForEach(EditorLineSpacing.allCases, id: \.self) { spacing in
-            Button {
-              _ = commands.applyLineSpacing(spacing)
-            } label: {
-              menuStateLabel(
-                spacing.rawValue,
-                selected: commands.currentLineSpacing == spacing
-              )
-            }
-          }
-        }
-        Menu(
-          commands.currentParagraphSpacingBefore == nil
-            ? "Space Before (Mixed or Custom)" : "Space Before"
-        ) {
-          paragraphSpacingButtons(before: true)
-        }
-        Menu(
-          commands.currentParagraphSpacingAfter == nil
-            ? "Space After (Mixed or Custom)" : "Space After"
-        ) {
-          paragraphSpacingButtons(before: false)
-        }
-        Divider()
-        Button("Increase Indent") { _ = commands.increaseIndent() }
-        Button("Decrease Indent") { _ = commands.decreaseIndent() }
-      } label: {
-        if iconOnly {
-          FormattingMenuIconLabel(systemImage: "arrow.up.and.down.text.horizontal")
-        } else if solidChrome.isActive {
-          notesSubmenuLabel("Paragraph", systemImage: "list.bullet")
-        } else {
-          Text("Paragraph")
-        }
-      }
-      .menuIndicator(iconOnly ? .hidden : .automatic)
-      .disabled(bodyCommandDisabled)
-      .accessibilityLabel("Paragraph")
-      .help("Paragraph formatting")
-    }
-
-    private var baselineMenu: some View {
-      Menu(commands.currentBaseline == nil ? "Baseline (Mixed)" : "Baseline") {
-        ForEach(EditorBaseline.allCases, id: \.self) { baseline in
-          Button {
-            _ = commands.setBaseline(baseline)
-          } label: {
-            menuStateLabel(
-              baseline.rawValue,
-              selected: commands.currentBaseline == baseline
-            )
-          }
-        }
-      }
-    }
-
-    private var caseMenu: some View {
-      Menu("Change Case") {
-        ForEach(EditorTextCase.allCases, id: \.self) { textCase in
-          Button(textCase.rawValue) { _ = commands.transformCase(textCase) }
-            .disabled(commands.textView?.selectedRange().length == 0)
-        }
-      }
-      .help("Uses locale-neutral Unicode case conversion.")
-    }
-
-    @ViewBuilder
-    private func toolsInsertMenu(title: String, iconOnly: Bool) -> some View {
-      let actions: [NotesMenuAction?] = [
-        NotesMenuAction(title: "Web Link…", symbol: "link", perform: presentWebLinkEditor),
-        NotesMenuAction(title: "Link to Note…", symbol: "doc.text") {
-          guard let textView = commands.textView as? ListAwareTextView else { return }
-          textView.onRequestNoteLink?(textView.selectedRange())
+      guard includeAutomatic else { return styles.map(Optional.some) }
+      return [
+        NotesCascadeItem(family == .bullets ? "Bulleted List" : "Numbered List") {
+          performListAction(fromOverflow: true) { commands.applyAutomaticList(family) }
         },
         nil,
-        NotesMenuAction(title: "Find in Note", symbol: "magnifyingglass") { _ = commands.performFind(.showFind) },
-        NotesMenuAction(title: "Replace in Note", symbol: "arrow.up.arrow.down") { _ = commands.performFind(.showReplace) },
-        NotesMenuAction(title: "Find Next", symbol: "chevron.down") { _ = commands.performFind(.nextMatch) },
-        NotesMenuAction(title: "Find Previous", symbol: "chevron.up") { _ = commands.performFind(.previousMatch) },
-      ]
-      if solidChrome.isActive && !iconOnly {
-        NotesAnchoredMenu(
-          title: title, placement: .alongside, width: 236, actions: actions, selection: solidChrome.popoverSelection
-        ) {
-          notesSubmenuLabel(title, systemImage: "link")
+      ] + styles.map(Optional.some)
+    }
+
+    private func directFormattingMenu(_ item: FormattingToolbarItem) -> some View {
+      let branch = formattingBranch(item, fromOverflow: false)
+      return Menu {
+        if case .submenu(let children) = branch.action { NotesNativeMenuItems(items: children) }
+      } label: {
+        switch item {
+        case .textStyles: ToolbarIconLabel(systemImage: "textformat.size")
+        case .text: FormattingMenuIconLabel(systemImage: "textformat.alt")
+        default: FormattingMenuIconLabel(systemImage: "arrow.up.and.down.text.horizontal")
         }
+      }
+      .menuIndicator(item == .textStyles ? .automatic : .hidden)
+      .disabled(!branch.isEnabled)
+      .accessibilityLabel(branch.title)
+      .accessibilityValue(branch.value ?? "")
+      .help(branch.help ?? "")
+    }
+
+    private func formattingBranch(_ item: FormattingToolbarItem, fromOverflow: Bool) -> NotesCascadeItem {
+      let perform = { (command: () -> Void) in
+        if fromOverflow && solidChrome.isActive { performOverflowAction(command) }
+        else { command() }
+      }
+      switch item {
+      case .textStyles:
+        return NotesCascadeItem("Text Style", icon: "text.book.closed", help: "Apply durable visual paragraph styling",
+          value: commands.currentTextStyle?.rawValue ?? "Mixed or custom", isEnabled: !bodyCommandDisabled,
+          items: EditorTextStyle.allCases.map { style in
+            NotesCascadeItem(style.rawValue, isSelected: commands.currentTextStyle == style) {
+              perform { _ = commands.applyTextStyle(style) }
+            }
+          })
+      case .text:
+        return NotesCascadeItem("Text", icon: "bold", help: "Text formatting", isEnabled: !bodyCommandDisabled,
+          items: [
+            NotesCascadeItem("Clear Text Formatting") { perform { _ = commands.clearTextFormatting() } },
+            nil,
+            NotesCascadeItem("Copy Formatting",
+              help: "Copies the first selected run's visual formatting without using the clipboard.") {
+              perform { _ = commands.copyFormatting() }
+            },
+            NotesCascadeItem("Paste Formatting", isEnabled: commands.canPasteFormatting) {
+              perform { _ = commands.pasteFormatting() }
+            },
+            NotesCascadeItem("Cancel Copied Formatting", isEnabled: commands.canPasteFormatting) {
+              perform { commands.cancelCopiedFormatting() }
+            },
+            nil,
+            NotesCascadeItem(commands.currentBaseline == nil ? "Baseline (Mixed)" : "Baseline",
+              items: EditorBaseline.allCases.map { baseline in
+                NotesCascadeItem(baseline.rawValue, isSelected: commands.currentBaseline == baseline) {
+                  perform { _ = commands.setBaseline(baseline) }
+                }
+              }),
+            NotesCascadeItem("Change Case", help: "Uses locale-neutral Unicode case conversion.",
+              items: EditorTextCase.allCases.map { textCase in
+                NotesCascadeItem(textCase.rawValue, isEnabled: commands.textView?.selectedRange().length != 0) {
+                  perform { _ = commands.transformCase(textCase) }
+                }
+              }),
+          ])
+      default:
+        let alignments: [(String, NSTextAlignment)] = [
+          ("Left", .left), ("Center", .center), ("Right", .right), ("Justified", .justified),
+        ]
+        let spacing = [true, false].map { before in
+          let current = before ? commands.currentParagraphSpacingBefore : commands.currentParagraphSpacingAfter
+          let title = before ? "Space Before" : "Space After"
+          return NotesCascadeItem(current == nil ? title + " (Mixed or Custom)" : title,
+            items: stride(from: 0, through: 36, by: 6).map { points in
+              NotesCascadeItem("\(points) pt", isSelected: current == CGFloat(points)) {
+                perform {
+                  if before { _ = commands.applyParagraphSpacingBefore(CGFloat(points)) }
+                  else { _ = commands.applyParagraphSpacingAfter(CGFloat(points)) }
+                }
+              }
+            })
+        }
+        return NotesCascadeItem("Paragraph", icon: "list.bullet", help: "Paragraph formatting",
+          isEnabled: !bodyCommandDisabled, items: [
+            NotesCascadeItem(commands.isAlignmentMixed ? "Alignment (Mixed)" : "Alignment",
+              items: alignments.map { title, alignment in
+                NotesCascadeItem(title, isSelected: commands.currentAlignment == alignment) {
+                  perform { _ = commands.applyAlignment(alignment) }
+                }
+              }),
+            NotesCascadeItem(commands.currentLineSpacing == nil ? "Line Spacing (Mixed or Custom)" : "Line Spacing",
+              items: EditorLineSpacing.allCases.map { lineSpacing in
+                NotesCascadeItem(lineSpacing.rawValue, isSelected: commands.currentLineSpacing == lineSpacing) {
+                  perform { _ = commands.applyLineSpacing(lineSpacing) }
+                }
+              }),
+            spacing[0], spacing[1], nil,
+            NotesCascadeItem("Increase Indent") { perform { _ = commands.increaseIndent() } },
+            NotesCascadeItem("Decrease Indent") { perform { _ = commands.decreaseIndent() } },
+          ])
+      }
+    }
+
+    private func toolsInsertActions(fromOverflow: Bool) -> [NotesCascadeItem?] {
+      let perform = { (command: () -> Void) in
+        if solidChrome.isActive { performOverflowAction(command) }
+        else { command() }
+      }
+      return [
+        NotesCascadeItem("Web Link…", paperGlyph: .backlinks) {
+          if solidChrome.isActive && fromOverflow { presentWebLinkEditor(afterOverflow: true) }
+          else { perform { presentWebLinkEditor() } }
+        },
+        NotesCascadeItem("Link to Note…", paperGlyph: .toolsDocument) {
+          guard isEditorVisible, let textView = commands.textView as? ListAwareTextView,
+            let note = appState.selectedNote
+          else { return }
+          let range = textView.selectedRange()
+          let request = { [weak textView] in
+            guard let textView, commands.textView === textView,
+              appState.selectedNote?.id == note.id, appState.selectedNote?.revision == note.revision
+            else { return }
+            textView.onRequestNoteLink?(range)
+          }
+          if solidChrome.isActive && fromOverflow {
+            requestAfterOverflow = request
+            presentedPopover = nil
+          } else {
+            request()
+          }
+        },
+        nil,
+        NotesCascadeItem("Find in Note", paperGlyph: .search) { perform { _ = commands.performFind(.showFind) } },
+        NotesCascadeItem("Replace in Note", paperGlyph: .toolsReplace) { perform { _ = commands.performFind(.showReplace) } },
+        NotesCascadeItem("Find Next", paperGlyph: .fontDisclosure) { perform { _ = commands.performFind(.nextMatch) } },
+        NotesCascadeItem("Find Previous", paperGlyph: .chevron) { perform { _ = commands.performFind(.previousMatch) } },
+      ]
+    }
+
+    @ViewBuilder private var toolsInsertMenu: some View {
+      let actions = toolsInsertActions(fromOverflow: false)
+      let icon = FormattingMenuIconLabel(systemImage: "wrench.adjustable")
+      if solidChrome.isActive {
+        NotesToolsMenu(title: "Tools", chrome: solidChrome, actions: actions) { icon }
         .disabled(bodyCommandDisabled)
         .help("Links and find tools")
       } else {
         Menu {
-          ForEach(actions.indices, id: \.self) { index in
-            if let action = actions[index] {
-              Button(action.title, action: action.perform)
-            } else {
-              Divider()
-            }
-          }
+          NotesNativeMenuItems(items: actions)
         } label: {
-          if iconOnly {
-            FormattingMenuIconLabel(systemImage: "wrench.adjustable")
-          } else {
-            Text(title)
-          }
+          icon
         }
-        .menuIndicator(iconOnly ? .hidden : .automatic)
+        .menuIndicator(.hidden)
         .disabled(bodyCommandDisabled)
-        .accessibilityLabel(title)
+        .accessibilityLabel("Tools")
         .help("Links and find tools")
-      }
-    }
-
-    private func notesSubmenuLabel(_ title: String, systemImage: String) -> some View {
-      HStack(spacing: 8) {
-        Image(systemName: systemImage)
-          .font(.system(size: 15))
-          .frame(width: 18)
-          .accessibilityHidden(true)
-        Text(title)
-        Spacer(minLength: 0)
-        Image(systemName: "chevron.right")
-          .font(.system(size: 8, weight: .medium))
-          .frame(width: 10)
-          .accessibilityHidden(true)
-      }
-      .font(.system(size: 12))
-      .padding(.horizontal, 8)
-      .frame(height: 29)
-      .contentShape(Rectangle())
-    }
-
-    private func alignmentButton(_ title: String, _ alignment: NSTextAlignment) -> some View {
-      Button {
-        _ = commands.applyAlignment(alignment)
-      } label: {
-        menuStateLabel(title, selected: commands.currentAlignment == alignment)
-      }
-    }
-
-    @ViewBuilder private func paragraphSpacingButtons(before: Bool) -> some View {
-      ForEach(Array(stride(from: 0, through: 36, by: 6)), id: \.self) { points in
-        Button {
-          if before {
-            _ = commands.applyParagraphSpacingBefore(CGFloat(points))
-          } else {
-            _ = commands.applyParagraphSpacingAfter(CGFloat(points))
-          }
-        } label: {
-          menuStateLabel(
-            "\(points) pt",
-            selected: (before
-              ? commands.currentParagraphSpacingBefore
-              : commands.currentParagraphSpacingAfter) == CGFloat(points)
-          )
-        }
-      }
-    }
-
-    @ViewBuilder private func menuStateLabel(_ title: String, selected: Bool) -> some View {
-      if selected {
-        Label(title, systemImage: "checkmark")
-      } else {
-        Text(title)
       }
     }
 
@@ -5324,6 +5435,9 @@
     private var fontPickerContent: some View {
       if let target = fontPickerTarget {
         let isMixed = !target.isTitle && commands.isFontFamilyMixed
+        let isCurrentPresentation = {
+          !solidChrome.isActive || (presentedPopover == .font && fontPickerTarget === target)
+        }
         FontFamilyPicker(
           currentFamily: target.isTitle
             ? target.note.titleFontFamily ?? appState.preferences.fontFamily
@@ -5331,8 +5445,11 @@
           isMixed: isMixed,
           targetLabel: target.label,
           notesChrome: solidChrome.isActive ? solidChrome : nil,
-          onSearchChanged: { fontPickerIsSearching = $0 },
+          onSearchChanged: {
+            if isCurrentPresentation() { fontPickerIsSearching = $0 }
+          },
           onCommit: { family in
+            guard isCurrentPresentation() else { return }
             _ = target.apply(
               family,
               note: appState.selectedNote,
@@ -5348,8 +5465,11 @@
             )
             presentedPopover = nil
           },
-          onCancel: { presentedPopover = nil }
+          onCancel: {
+            if isCurrentPresentation() { presentedPopover = nil }
+          }
         )
+        .id(solidChrome.isActive ? ObjectIdentifier(target) : nil)
         .frame(width: 280, height: FontFamilyPickerController.presentationHeight(
           isCompact: solidChrome.isActive, isMixed: isMixed, isSearching: fontPickerIsSearching
         ))
@@ -5358,9 +5478,28 @@
 
     private var fontSizePickerContent: some View {
       Group {
-        if let targetNoteID = fontSizePickerNoteID {
+        if solidChrome.isActive {
+          if let edit = solidFontSizeEdit, case .overflow = edit.field {
+            SolidOverflowSizeDraft { draft in
+              HStack(spacing: 8) {
+                fontSizeField(field: edit.field, overflowDraft: draft)
+                Button("Done") {
+                  submitSolidFontSize(edit.field, dismissPicker: true, overflowDraft: draft.wrappedValue)
+                }
+              }
+              .padding(12)
+              .task(id: edit.field) {
+                guard solidFontSizeEdit?.id == edit.id, isCurrentSolidFontSizeEdit(edit),
+                  presentedPopover == .fontSize
+                else { return }
+                focusedFontSizeField = edit.field
+              }
+            }
+            .id(edit.field)
+          }
+        } else if let targetNoteID = fontSizePickerNoteID {
           HStack(spacing: 8) {
-            fontSizeField(targetNoteID: targetNoteID)
+            fontSizeField(field: .overflow(nil), targetNoteID: targetNoteID)
             Button("Done") {
               applyFontSizeText(targetNoteID: targetNoteID)
               presentedPopover = nil
@@ -5476,24 +5615,52 @@
       _ action: @escaping @MainActor @Sendable () -> Void
     ) {
       guard isEditorVisible else { return }
+      if solidChrome.isActive && presentedPopover?.isOverflow == true {
+        let note = appState.selectedNote
+        requestAfterOverflow = {
+          guard let note, appState.selectedNote?.id == note.id,
+            appState.selectedNote?.revision == note.revision
+          else { return }
+          action()
+        }
+        presentedPopover = nil
+        return
+      }
       presentedPopover = nil
       DispatchQueue.main.async(execute: action)
     }
 
-    private func presentFontPicker() {
+    private func presentFontPicker(from owner: PopoverOwner) {
       guard isEditorVisible, let note = appState.selectedNote else { return }
+      if solidChrome.isActive { fontPickerIsSearching = false }
       fontPickerTarget = FontPickerTarget(
         note: note,
         isTitle: isFontTitleTarget,
-        commands: commands
+        commands: commands,
+        preservedFamily: solidChrome.isActive && !isFontFamilyMixed ? currentFontFamily : nil
       )
-      if fontPickerTarget != nil { presentedPopover = .font }
+      if fontPickerTarget != nil { showPopover(.font, from: owner) }
     }
 
-    private func presentWebLinkEditor() {
-      guard !bodyCommandDisabled, let note = appState.selectedNote else { return }
-      webLinkTarget = EditorWebLinkTarget(note: note, commands: commands)
-      if webLinkTarget != nil { presentedPopover = .webLink }
+    private func presentWebLinkEditor(afterOverflow: Bool = false) {
+      guard !bodyCommandDisabled, let note = appState.selectedNote,
+        let target = EditorWebLinkTarget(note: note, commands: commands)
+      else { return }
+      if afterOverflow, presentedPopover?.isOverflow == true {
+        requestAfterOverflow = {
+          guard presentedPopover == nil, target.isValid(
+            note: appState.selectedNote,
+            isEditorVisible: isEditorVisible,
+            commands: commands
+          ) else { return }
+          webLinkTarget = target
+          showPopover(.webLink, from: .more)
+        }
+        presentedPopover = nil
+      } else {
+        webLinkTarget = target
+        showPopover(.webLink, from: .control(.tools))
+      }
     }
 
     private func dismissWebLinkEditor() {
@@ -5518,12 +5685,36 @@
       return String(format: "%.2f", size).replacingOccurrences(of: #"\.00$"#, with: "", options: .regularExpression)
     }
 
-    private func fontSizeField(targetNoteID: UUID? = nil) -> some View {
-      TextField(
+    private func fontSizeField(
+      field: FontSizeField = .direct, targetNoteID: UUID? = nil,
+      overflowDraft: Binding<String?>? = nil
+    ) -> some View {
+      let isFontSizeFocused = focusedFontSizeField == field
+      let handlesEscape = solidChrome.isActive && (isFontSizeFocused || overflowDraft != nil)
+      return TextField(
         "Size",
         text: Binding(
-          get: { fontSizeText },
+          get: {
+            guard solidChrome.isActive else { return fontSizeText }
+            return overflowDraft?.wrappedValue
+              ?? (solidFontSizeEdit?.field == field ? solidFontSizeEdit?.text : nil)
+              ?? fontSizeDisplay
+          },
           set: { value in
+            if solidChrome.isActive {
+              if let overflowDraft {
+                if value != (overflowDraft.wrappedValue ?? fontSizeDisplay) {
+                  overflowDraft.wrappedValue = value
+                }
+                return
+              }
+              guard focusedFontSizeField == field, let edit = solidFontSizeEdit,
+                edit.field == field, isCurrentSolidFontSizeEdit(edit),
+                value != (edit.text ?? fontSizeDisplay)
+              else { return }
+              solidFontSizeEdit?.text = value
+              return
+            }
             guard value != fontSizeText else { return }
             fontSizeText = value
             hasUncommittedFontSizeEdit = true
@@ -5535,33 +5726,77 @@
         .focusEffectDisabled()
         .multilineTextAlignment(.center)
         .monospacedDigit()
-      .font(solidChrome.isActive ? .system(size: 12) : nil)
-      .frame(width: fontSizeFieldWidth, height: solidChrome.isActive ? 28 : nil)
-      .background(
-        solidChrome.isActive ? solidChrome.toolbarField : .clear,
-        in: RoundedRectangle(cornerRadius: 5)
-      )
-        .focused($isFontSizeFocused)
+        .font(solidChrome.isActive ? .system(size: 12, weight: solidChrome.increasedContrast ? .regular : .light) : nil)
+        .frame(width: fontSizeFieldWidth, height: solidChrome.isActive ? 28 : nil)
+        .background(
+          solidChrome.isActive ? solidChrome.toolbarField : .clear,
+          in: RoundedRectangle(cornerRadius: 5)
+        )
+        .focused($focusedFontSizeField, equals: field)
         .overlay(alignment: .bottom) {
-          Rectangle()
-            .fill(
-              isFontSizeFocused
-                ? theme.color(.accent)
-                : isFontSizeHovered ? Color.primary.opacity(0.22) : .clear
-            )
-            .frame(height: isFontSizeFocused ? 1.5 : 1)
-            .padding(.horizontal, 4)
+          if solidChrome.isActive {
+            RoundedRectangle(cornerRadius: 5)
+              .strokeBorder(
+                isFontSizeFocused ? theme.color(.focusRing).opacity(solidChrome.increasedContrast ? 1 : 0.65)
+                  : isFontSizeHovered ? Color.primary.opacity(0.22) : .clear,
+                lineWidth: 1
+              )
+              .allowsHitTesting(false)
+          } else {
+            Rectangle()
+              .fill(
+                isFontSizeFocused
+                  ? theme.color(.accent)
+                  : isFontSizeHovered ? Color.primary.opacity(0.22) : .clear
+              )
+              .frame(height: isFontSizeFocused ? 1.5 : 1)
+              .padding(.horizontal, 4)
+          }
         }
         .onHover { isFontSizeHovered = $0 }
-        .onChange(of: isFontSizeFocused) { wasFocused, isFocused in
-          if wasFocused && !isFocused { applyFontSizeText(targetNoteID: targetNoteID) }
+        .onExitCommand(perform: handlesEscape ? {
+          if overflowDraft != nil || focusedFontSizeField == field { discardSolidFontSize(field) }
+        } : nil)
+        .onKeyPress(.escape) {
+          guard handlesEscape else { return .ignored }
+          discardSolidFontSize(field)
+          return .handled
         }
-        .onSubmit { applyFontSizeText(targetNoteID: targetNoteID) }
+        .onChange(of: focusedFontSizeField) { oldField, newField in
+          if solidChrome.isActive {
+            if newField == field, field == .direct {
+              solidFontSizeEdit = makeSolidFontSizeEdit(for: field)
+            } else if field == .direct, oldField == field, let edit = solidFontSizeEdit, edit.field == field {
+              DispatchQueue.main.async {
+                guard focusedFontSizeField != field, solidFontSizeEdit?.id == edit.id else { return }
+                submitSolidFontSize(field, dismissPicker: false)
+              }
+            }
+          } else if oldField == field && newField != field {
+            applyFontSizeText(targetNoteID: targetNoteID)
+          }
+        }
+        .onSubmit {
+          if solidChrome.isActive {
+            guard overflowDraft != nil || focusedFontSizeField == field else { return }
+            submitSolidFontSize(field, dismissPicker: field != .direct, overflowDraft: overflowDraft?.wrappedValue)
+          } else {
+            applyFontSizeText(targetNoteID: targetNoteID)
+          }
+        }
         .onDisappear {
-          if targetNoteID != nil { applyFontSizeText(targetNoteID: targetNoteID) }
+          if solidChrome.isActive {
+            discardSolidFontSize(field, dismissPicker: false)
+          } else if targetNoteID != nil {
+            applyFontSizeText(targetNoteID: targetNoteID)
+          }
         }
         .accessibilityLabel("Font size")
-        .accessibilityValue(commands.isFontSizeMixed ? "Mixed" : fontSizeDisplay)
+        .accessibilityValue(
+          overflowDraft?.wrappedValue
+            ?? (solidChrome.isActive && solidFontSizeEdit?.field == field ? solidFontSizeEdit?.text : nil)
+            ?? (commands.isFontSizeMixed ? "Mixed" : fontSizeDisplay)
+        )
         .accessibilityHint("Enter a size from 1 through 512 points.")
     }
 
@@ -5592,23 +5827,94 @@
     }
 
     private func syncFontSizeText() {
-      guard !isFontSizeFocused else { return }
+      guard focusedFontSizeField == nil else { return }
       fontSizeText = fontSizeDisplay
     }
 
     private func presentFontSizePicker() {
-      guard isEditorVisible, let noteID = appState.selectedNote?.id else { return }
-      fontSizePickerNoteID = noteID
-      syncFontSizeText()
-      presentedPopover = .fontSize
+      if solidChrome.isActive {
+        guard !fontSizeIsDirect, let edit = makeSolidFontSizeEdit(for: .overflow(UUID())) else { return }
+        solidFontSizeEdit = edit
+        presentOverflowPicker {
+          guard presentedPopover == nil, solidFontSizeEdit?.id == edit.id,
+            isCurrentSolidFontSizeEdit(edit)
+          else { return }
+          showPopover(.fontSize, from: .more)
+        }
+      } else {
+        presentOverflowPicker {
+          guard isEditorVisible, let noteID = appState.selectedNote?.id else { return }
+          fontSizePickerNoteID = noteID
+          syncFontSizeText()
+          showPopover(.fontSize, from: .more)
+        }
+      }
     }
 
     private func dismissInvalidFontSizePicker() {
+      if solidChrome.isActive {
+        if let edit = solidFontSizeEdit, !isCurrentSolidFontSizeEdit(edit) {
+          discardSolidFontSize(edit.field)
+        }
+        return
+      }
       guard presentedPopover == .fontSize,
         !isEditorVisible || fontSizePickerNoteID != appState.selectedNote?.id
       else { return }
-      isFontSizeFocused = false
+      focusedFontSizeField = nil
       presentedPopover = nil
+    }
+
+    private var fontSizeIsDirect: Bool {
+      (selectedVisibleCount ?? 0) > FormattingToolbarItem.fontSize.rawValue
+    }
+
+    private func makeSolidFontSizeEdit(for field: FontSizeField) -> SolidFontSizeEdit? {
+      guard !bodyCommandDisabled, let note = appState.selectedNote, let textView = commands.textView
+      else { return nil }
+      return SolidFontSizeEdit(
+        field: field, noteID: note.id, revision: note.revision,
+        editorGeneration: commands.editorSessionGeneration, selection: textView.selectedRange()
+      )
+    }
+
+    private func isCurrentSolidFontSizeEdit(_ edit: SolidFontSizeEdit) -> Bool {
+      guard solidChrome.isActive, !bodyCommandDisabled, appState.preferences.showFormattingBar,
+        fontSizeIsDirect == (edit.field == .direct), let note = appState.selectedNote,
+        note.id == edit.noteID, note.revision == edit.revision
+      else { return false }
+      return commands.editorSessionGeneration == edit.editorGeneration
+        && commands.textView?.selectedRange() == edit.selection
+    }
+
+    private func discardSolidFontSize(_ field: FontSizeField, dismissPicker: Bool = true) {
+      guard solidFontSizeEdit?.field == field else { return }
+      solidFontSizeEdit = nil
+      if focusedFontSizeField == field { focusedFontSizeField = nil }
+      if dismissPicker, field != .direct, presentedPopover == .fontSize { presentedPopover = nil }
+    }
+
+    private func submitSolidFontSize(_ field: FontSizeField, dismissPicker: Bool, overflowDraft: String? = nil) {
+      guard let edit = solidFontSizeEdit, edit.field == field else { return }
+      guard isCurrentSolidFontSizeEdit(edit), field == .direct || presentedPopover == .fontSize
+      else {
+        discardSolidFontSize(field)
+        return
+      }
+      solidFontSizeEdit?.text = nil
+      if let text = field == .direct ? edit.text : overflowDraft,
+        let size = FontSizeSubmission.requestedSize(
+          for: text, currentSize: commands.currentFontSize, isMixed: commands.isFontSizeMixed
+        )
+      {
+        _ = commands.applyFontSize(size)
+        if !dismissPicker, let nextEdit = makeSolidFontSizeEdit(for: field) {
+          solidFontSizeEdit = nextEdit
+        }
+      }
+      if dismissPicker || (field == .direct && focusedFontSizeField != field) {
+        discardSolidFontSize(field)
+      }
     }
 
     private func applyFontSizeText(targetNoteID: UUID? = nil) {
@@ -5761,7 +6067,7 @@
       case .opaque:
         let solidChrome = NotesSolidChrome(theme: theme, appearance: appearance)
         if solidChrome.isActive {
-          let compactShape = RoundedRectangle(cornerRadius: 10)
+          let compactShape = RoundedRectangle(cornerRadius: 8, style: .circular)
           content.background {
             compactShape.fill(solidChrome.toolbarSurface)
               .overlay { compactShape.strokeBorder(solidChrome.toolbarOutline, lineWidth: 1) }
@@ -5841,6 +6147,13 @@
       surfaceColor = color
       updateSurfaceColor()
     }
+  }
+
+  private struct SolidOverflowSizeDraft<Content: View>: View {
+    @State private var draft: String? = nil
+    @ViewBuilder let content: (Binding<String?>) -> Content
+
+    var body: some View { content($draft) }
   }
 
   private struct CrispToolbarButtonStyle: ButtonStyle {
@@ -6128,14 +6441,18 @@
     @ObservedObject var controller: FluidTabDragController
     let selectedID: UUID?
     let selectedColor: Color?
+    let hoverColor: Color?
     let reduceMotion: Bool
+    let capsuleOutset: CGFloat
     let content: Content
-    init(controller: FluidTabDragController, selectedID: UUID?, selectedColor: Color?,
-      reduceMotion: Bool, @ViewBuilder content: () -> Content) {
+    init(controller: FluidTabDragController, selectedID: UUID?, selectedColor: Color?, hoverColor: Color?,
+      reduceMotion: Bool, capsuleOutset: CGFloat, @ViewBuilder content: () -> Content) {
       self.controller = controller
       self.selectedID = selectedID
       self.selectedColor = selectedColor
+      self.hoverColor = hoverColor
       self.reduceMotion = reduceMotion
+      self.capsuleOutset = capsuleOutset
       self.content = content()
     }
     func makeNSView(context: Context) -> FluidTabDestinationView {
@@ -6153,8 +6470,10 @@
         color: selectedColor.flatMap {
           NSColor(cgColor: $0.resolve(in: context.environment).cgColor)
         },
-        reduceMotion: reduceMotion
+        reduceMotion: reduceMotion,
+        capsuleOutset: capsuleOutset
       )
+      view.updateHoverColor(hoverColor.map { $0.resolve(in: context.environment).cgColor })
     }
   }
 
@@ -6165,8 +6484,113 @@
     private var selectedColor: NSColor?
     private var selectionTargetFrame: CGRect?
     private var reduceMotion = false
+    private var capsuleOutset: CGFloat = 0
+    let hoverHighlightLayer = CALayer()
+    private weak var hoveredSource: ReorderSourceHostingView?
+    private var hoverMonitor: Any?
+    private var hoverExitArea: NSTrackingArea?
 
-    func updateSelection(noteID: UUID?, color: NSColor?, reduceMotion: Bool) {
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+      if newWindow !== window { stopHoverTracking() }
+      super.viewWillMove(toWindow: newWindow)
+    }
+
+    override func viewDidMoveToWindow() {
+      super.viewDidMoveToWindow()
+      startHoverTrackingIfNeeded()
+    }
+
+    func updateHoverColor(_ color: CGColor?) {
+      if color != nil, hoverHighlightLayer.superlayer == nil {
+        hoverHighlightLayer.zPosition = -1
+        layer?.insertSublayer(hoverHighlightLayer, at: 0)
+      }
+      CATransaction.begin()
+      CATransaction.setDisableActions(true)
+      hoverHighlightLayer.backgroundColor = color
+      CATransaction.commit()
+      if color == nil { stopHoverTracking() } else { startHoverTrackingIfNeeded() }
+      syncHoverFrame()
+    }
+
+    private func startHoverTrackingIfNeeded() {
+      guard let window, hoverHighlightLayer.backgroundColor != nil else { return }
+      window.acceptsMouseMovedEvents = true
+      guard hoverMonitor == nil else { return }
+      let area = NSTrackingArea(
+        rect: .zero, options: [.inVisibleRect, .activeAlways, .mouseEnteredAndExited],
+        owner: self, userInfo: nil
+      )
+      addTrackingArea(area)
+      hoverExitArea = area
+      hoverMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) {
+        [weak self] event in
+        self?.updateHover(for: event)
+        return event
+      }
+    }
+
+    private func stopHoverTracking() {
+      if let hoverMonitor { NSEvent.removeMonitor(hoverMonitor) }
+      hoverMonitor = nil
+      if let hoverExitArea { removeTrackingArea(hoverExitArea) }
+      hoverExitArea = nil
+      setHoveredSource(nil)
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+      if let hoverExitArea, event.trackingArea === hoverExitArea {
+        updateHover(for: event)
+      } else {
+        super.mouseEntered(with: event)
+      }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+      if let hoverExitArea, event.trackingArea === hoverExitArea {
+        setHoveredSource(nil)
+      } else {
+        super.mouseExited(with: event)
+      }
+    }
+
+    private func updateHover(for event: NSEvent) {
+      guard event.type != .leftMouseDragged, let window, window.isVisible, event.window === window,
+        let superview, visibleRect.contains(convert(event.locationInWindow, from: nil)),
+        let hit = hitTest(superview.convert(event.locationInWindow, from: nil)) else {
+        setHoveredSource(nil)
+        return
+      }
+      let source = sequence(first: hit as NSView?, next: { $0?.superview })
+        .compactMap { $0 as? ReorderSourceHostingView }.first
+      setHoveredSource(source)
+    }
+
+    private func setHoveredSource(_ source: ReorderSourceHostingView?) {
+      guard hoveredSource !== source || (source == nil && !hoverHighlightLayer.isHidden) else { return }
+      hoveredSource = source
+      syncHoverFrame()
+    }
+
+    private func syncHoverFrame() {
+      CATransaction.begin()
+      CATransaction.setDisableActions(true)
+      defer { CATransaction.commit() }
+      guard hoverHighlightLayer.backgroundColor != nil, let source = hoveredSource,
+        let window, let noteID = source.noteID, noteID != selectedID, source.window === window,
+        source.layer?.opacity != 0 else {
+        hoverHighlightLayer.isHidden = true
+        return
+      }
+      let target = convert(
+        source.labelCapsuleRect.insetBy(dx: -capsuleOutset, dy: -capsuleOutset), from: source
+      )
+      hoverHighlightLayer.frame = target
+      hoverHighlightLayer.cornerRadius = target.height / 2
+      hoverHighlightLayer.isHidden = false
+    }
+
+    func updateSelection(noteID: UUID?, color: NSColor?, reduceMotion: Bool, capsuleOutset: CGFloat = 0) {
       wantsLayer = true
       if selectionHighlightLayer.superlayer == nil {
         selectionHighlightLayer.isHidden = true
@@ -6179,6 +6603,7 @@
       selectedID = noteID
       selectedColor = color
       self.reduceMotion = reduceMotion
+      self.capsuleOutset = capsuleOutset
       CATransaction.begin()
       CATransaction.setDisableActions(true)
       selectionHighlightLayer.backgroundColor = color?.cgColor
@@ -6192,6 +6617,7 @@
     override func layout() {
       super.layout()
       syncSelectionFrame(animated: false)
+      syncHoverFrame()
     }
 
     func selectionSourcePresentationDidChange(_ source: ReorderSourceHostingView, animated: Bool) {
@@ -6210,7 +6636,7 @@
         selectionHighlightLayer.isHidden = true
         return
       }
-      var target = convert(source.labelCapsuleRect, from: source)
+      var target = convert(source.labelCapsuleRect.insetBy(dx: -capsuleOutset, dy: -capsuleOutset), from: source)
       target.origin.x += source.layer?.transform.m41 ?? 0
       let hidden = source.layer?.opacity == 0
       CATransaction.begin()
@@ -6928,6 +7354,7 @@
   }
 
   private struct ToolbarIconLabel: View {
+    @Environment(\.fleckChromeAppearance) private var appearance
     @Environment(\.fleckThemeSnapshot) private var theme
     let systemImage: String
     var isActive = false
@@ -6941,7 +7368,7 @@
           Image(systemName: systemImage)
         }
       }
-      .frame(width: 28, height: 26)
+      .frame(width: 28, height: NotesSolidChrome(theme: theme, appearance: appearance).isActive ? 28 : 26)
       .background(
         isActive ? theme.color(.selectionFill) : .clear,
         in: RoundedRectangle(cornerRadius: 5)
@@ -6977,7 +7404,7 @@
             .font(.system(size: 17, weight: .bold))
         }
       }
-      .frame(width: 28, height: 26)
+      .frame(width: 28, height: NotesSolidChrome(theme: theme, appearance: appearance).isActive ? 28 : 26)
       .contentShape(RoundedRectangle(cornerRadius: 5))
     }
   }

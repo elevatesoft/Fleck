@@ -16,6 +16,17 @@
       }
       return color
     }
+
+    static func drawText(grayscale: Bool, _ draw: () -> Void) {
+      guard grayscale, let context = NSGraphicsContext.current?.cgContext else {
+        draw()
+        return
+      }
+      context.saveGState()
+      defer { context.restoreGState() }
+      context.setShouldSmoothFonts(false)
+      draw()
+    }
   }
 
   private func editorTextExactlyMatches(_ lhs: String, _ rhs: String) -> Bool {
@@ -884,6 +895,14 @@
   }
 
   private final class NoteTitleFieldEditor: NSTextView {
+    var usesGrayscaleTextAntialiasing = false
+
+    override func draw(_ dirtyRect: NSRect) {
+      EditorCanvasInk.drawText(grayscale: usesGrayscaleTextAntialiasing) {
+        super.draw(dirtyRect)
+      }
+    }
+
     override func insertNewlineIgnoringFieldEditor(_ sender: Any?) {}
 
     override func insertLineBreak(_ sender: Any?) {}
@@ -928,13 +947,19 @@
     var titleTextColor: NSColor = .labelColor {
       didSet { fieldEditor?.textColor = titleTextColor }
     }
-    private let titleFieldEditor: NSTextView = {
+    let titleFieldEditor: NoteTitleFieldEditor = {
       let editor = NoteTitleFieldEditor(frame: .zero)
       editor.isFieldEditor = true
       return editor
     }()
     private weak var fieldEditor: NSTextView?
     private var originalCaretColor: NSColor?
+
+    override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
+      EditorCanvasInk.drawText(grayscale: titleFieldEditor.usesGrayscaleTextAntialiasing) {
+        super.drawInterior(withFrame: cellFrame, in: controlView)
+      }
+    }
 
     override func fieldEditor(for controlView: NSView) -> NSTextView? {
       titleFieldEditor
@@ -1017,6 +1042,20 @@
     override func viewDidChangeEffectiveAppearance() {
       super.viewDidChangeEffectiveAppearance()
       updateCanvasColor()
+      invalidateTextDrawing()
+    }
+
+    fileprivate func setGrayscaleTextAntialiasing(_ enabled: Bool) {
+      guard textView.usesGrayscaleTextAntialiasing != enabled else { return }
+      textView.usesGrayscaleTextAntialiasing = enabled
+      (titleField.cell as? NoteTitleCell)?.titleFieldEditor.usesGrayscaleTextAntialiasing = enabled
+      invalidateTextDrawing()
+    }
+
+    private func invalidateTextDrawing() {
+      titleField.needsDisplay = true
+      (titleField.cell as? NoteTitleCell)?.titleFieldEditor.needsDisplay = true
+      textView.needsDisplay = true
     }
 
     func setCanvasColor(_ color: NSColor?, titleTextColor: NSColor) {
@@ -1406,6 +1445,7 @@
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.fleckThemeSnapshot) private var theme
+    @Environment(\.fleckChromeAppearance) private var chromeAppearance
 
     let text: String
     let richTextRTF: Data?
@@ -1598,6 +1638,10 @@
       )
     }
 
+    private var usesGrayscaleTextAntialiasing: Bool {
+      NotesSolidChrome(theme: theme, appearance: chromeAppearance).isActive
+    }
+
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -1692,6 +1736,7 @@
         titleTextColor: titleTextColor,
         canvasColor: theme.nsColor(.editorOpaque)
       )
+      documentView.setGrayscaleTextAntialiasing(usesGrayscaleTextAntialiasing)
       scrollView.documentView = documentView
       documentView.autoresizingMask = [.width]
       scrollView.scrollMemory = commands.scrollMemory
@@ -1745,6 +1790,7 @@
       guard let scrollView = scrollView as? NativeEditorScrollView,
         let documentView = scrollView.documentView as? NativeEditorDocumentView
       else { return }
+      documentView.setGrayscaleTextAntialiasing(usesGrayscaleTextAntialiasing)
       let textView = documentView.textView
       let coordinator = context.coordinator
       coordinator.parent = self
@@ -2535,6 +2581,7 @@
     )
 
     var automaticLists = true
+    fileprivate var usesGrayscaleTextAntialiasing = false
 
     var liveNoteIDs: Set<UUID> = []
     var onRequestNoteLink: ((NSRange) -> Void)?
@@ -3380,12 +3427,24 @@
       if !selectedBulletPrefixes.isEmpty {
         let clippingPath = NSBezierPath(rect: dirtyRect)
         clippingPath.windingRule = .evenOdd
+        let context = NSGraphicsContext.current?.cgContext
         for prefix in selectedBulletPrefixes {
-          clippingPath.append(NSBezierPath(rect: prefix.selectionRect.intersection(dirtyRect)))
+          var exclusion = prefix.selectionRect
+          if let context {
+            let deviceRect = context.convertToDeviceSpace(exclusion)
+            let leading = deviceRect.minX.rounded(.down)
+            exclusion = context.convertToUserSpace(NSRect(
+              x: leading, y: deviceRect.minY,
+              width: deviceRect.maxX - leading, height: deviceRect.height
+            ))
+          }
+          clippingPath.append(NSBezierPath(rect: exclusion.intersection(dirtyRect)))
         }
         clippingPath.addClip()
       }
-      super.draw(dirtyRect)
+      EditorCanvasInk.drawText(grayscale: usesGrayscaleTextAntialiasing) {
+        super.draw(dirtyRect)
+      }
       NSGraphicsContext.restoreGraphicsState()
 
       if let storage = textStorage {
@@ -3402,7 +3461,9 @@
             background.setFill()
             NSBezierPath(rect: prefix.rect).fill()
           }
-          layoutManager?.drawGlyphs(forGlyphRange: prefix.glyphs, at: textContainerOrigin)
+          EditorCanvasInk.drawText(grayscale: usesGrayscaleTextAntialiasing) {
+            layoutManager?.drawGlyphs(forGlyphRange: prefix.glyphs, at: textContainerOrigin)
+          }
         }
       }
 
@@ -6923,6 +6984,7 @@
           )
         )
         context.saveGState()
+        if usesGrayscaleTextAntialiasing { context.setShouldSmoothFonts(false) }
         context.textMatrix = CGAffineTransform(scaleX: 1, y: isFlipped ? -1 : 1)
         context.textPosition = CGPoint(x: originX, y: baseline)
         CTLineDraw(line, context)

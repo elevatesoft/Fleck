@@ -139,7 +139,8 @@
     private let searchOperation: SearchOperation
     private var searchTask: Task<Void, Never>?
     private var searchGeneration: UInt64 = 0
-    private var resultGeneration: UInt64?
+    @Published private var resultGeneration: UInt64?
+    private(set) var resultsQuery: String?
     private weak var hostingWindow: NSWindow?
     private var attachedPresentationID: UInt64?
     private var focusOrigin: WorkspaceSearchFocusOrigin?
@@ -163,17 +164,26 @@
 
     var resultCountAccessibilityValue: String {
       let countDescription: String
-      switch results.count {
+      switch hasQuery ? results.count : 0 {
       case 0: countDescription = "No results"
       case 1: countDescription = "1 result"
       default: countDescription = "\(results.count) results"
       }
-      guard !results.isEmpty, !resultsAreCurrent else { return countDescription }
+      guard isUpdatingResults else { return countDescription }
+      guard !results.isEmpty else { return "Updating search results" }
       return "Updating search results; \(countDescription)"
     }
 
+    var hasQuery: Bool {
+      !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var isUpdatingResults: Bool {
+      isPresented && hasQuery && !resultsAreCurrent
+    }
+
     var resultsAreCurrent: Bool {
-      resultGeneration == searchGeneration
+      resultGeneration == searchGeneration && resultsQuery == query
     }
 
     func present(
@@ -193,6 +203,7 @@
       results = []
       highlightedNoteID = nil
       resultGeneration = nil
+      resultsQuery = nil
       hasActivatedCurrentPresentation = false
       presentationKind = presentation
       isPresented = true
@@ -216,6 +227,7 @@
       results = []
       highlightedNoteID = nil
       resultGeneration = nil
+      resultsQuery = nil
       hasActivatedCurrentPresentation = false
       let activationRestore = activationFocusRestore
       activationFocusRestore = nil
@@ -307,9 +319,9 @@
       let generation = searchGeneration
       resultGeneration = nil
       let requestQuery = query
-      let trimmedQuery = requestQuery.trimmingCharacters(in: .whitespacesAndNewlines)
 
-      guard isPresented, !trimmedQuery.isEmpty else {
+      guard isPresented, hasQuery else {
+        resultsQuery = nil
         results = []
         highlightedNoteID = nil
         return
@@ -326,12 +338,12 @@
         else {
           return
         }
-        self.apply(results, generation: generation)
+        self.apply(results, generation: generation, query: requestQuery)
       }
     }
 
     func moveHighlight(_ direction: HighlightDirection) {
-      guard !results.isEmpty else { return }
+      guard resultsAreCurrent, !results.isEmpty else { return }
 
       guard let highlightedNoteID,
         let currentIndex = results.firstIndex(where: { $0.noteID == highlightedNoteID })
@@ -366,7 +378,7 @@
       activate: (UUID) -> Void,
       onDismiss: (() -> Void)? = nil
     ) -> Bool {
-      guard resultGeneration == searchGeneration,
+      guard resultsAreCurrent,
         currentNoteIDs.contains(noteID),
         results.contains(where: { $0.noteID == noteID })
       else {
@@ -388,7 +400,7 @@
     ) -> Bool {
       guard isPresented,
         !hasActivatedCurrentPresentation,
-        resultGeneration == searchGeneration,
+        resultsAreCurrent,
         let noteID = highlightedNoteID,
         currentNoteIDs.contains(noteID),
         results.contains(where: { $0.noteID == noteID })
@@ -440,11 +452,12 @@
       }
     }
 
-    private func apply(_ results: [WorkspaceSearchResult], generation: UInt64) {
+    private func apply(_ results: [WorkspaceSearchResult], generation: UInt64, query: String) {
       let results = Array(results.prefix(50))
       let previousHighlight = highlightedNoteID
-      self.results = results
+      resultsQuery = query
       resultGeneration = generation
+      self.results = results
       if let previousHighlight,
         results.contains(where: { $0.noteID == previousHighlight })
       {
@@ -715,6 +728,42 @@
     }
   }
 
+  struct NotesQueryPanelChrome: ViewModifier {
+    @Environment(\.fleckThemeSnapshot) private var theme
+    let solid: NotesSolidChrome
+    let cornerRadius: CGFloat
+
+    private static let surface = Color(nsColor: NSColor(hex: "#202123")!)
+    private static let outline = Color(nsColor: NSColor(hex: "#3F4042")!)
+    static let searchPrompt = Color(nsColor: NSColor(hex: "#97999F")!)
+    static let searchSelection = Color(nsColor: NSColor(hex: "#3C3E42")!)
+    static let linkSelection = Color(nsColor: NSColor(hex: "#383B3D")!)
+
+    func body(content: Content) -> some View {
+      let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+      return content
+        .background(solid.isActive ? Self.surface : theme.color(.card), in: shape)
+        .overlay {
+          Group {
+            if solid.isActive {
+              shape.strokeBorder(solid.increasedContrast ? solid.outline : Self.outline)
+            } else {
+              shape.strokeBorder(.quaternary)
+            }
+          }
+          .accessibilityHidden(true)
+          .allowsHitTesting(false)
+        }
+    }
+
+    static func snippet(for result: WorkspaceSearchResult, in note: Note?) -> String {
+      guard result.match.field == .title, let note else { return result.snippet }
+      let prefix = note.body.drop(while: \.isWhitespace).prefix(121)
+      let preview = prefix.prefix(120).split(whereSeparator: \.isWhitespace).joined(separator: " ")
+      return prefix.count > 120 ? preview + "…" : preview
+    }
+  }
+
   struct WorkspaceSearchView: View {
     @Environment(\.fleckThemeSnapshot) private var theme
     @Environment(\.fleckChromeAppearance) private var appearance
@@ -730,7 +779,8 @@
     @State private var resultsHeight: CGFloat = 220
 
     var body: some View {
-      let compact = NotesSolidChrome(theme: theme, appearance: appearance).isActive
+      let solid = NotesSolidChrome(theme: theme, appearance: appearance)
+      let compact = solid.isActive
       ZStack(alignment: .topTrailing) {
         Color.clear
           .contentShape(Rectangle())
@@ -741,12 +791,21 @@
         VStack(alignment: .leading, spacing: 8) {
           HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
+              .font(compact ? .system(size: 12) : nil)
               .foregroundStyle(.secondary)
               .accessibilityHidden(true)
-            TextField("Search notes", text: $controller.query)
+            let prompt = compact
+              ? Text("Search notes").foregroundColor(NotesQueryPanelChrome.searchPrompt)
+              : nil
+            TextField("Search notes", text: $controller.query, prompt: prompt)
+              .font(compact ? .system(size: 14) : nil)
               .textFieldStyle(.plain)
               .focusEffectDisabled()
               .focused($isQueryFocused)
+              .fleckNeutralControlOutline(
+                isFocused: compact && solid.increasedContrast && isQueryFocused,
+                cornerRadius: 6
+              )
               .accessibilityLabel("Search notes")
               .accessibilityHint("Search note titles and bodies")
               .onKeyPress(.upArrow) {
@@ -790,6 +849,8 @@
               onDismiss()
             } label: {
               Image(systemName: "xmark")
+                .font(compact ? .system(size: 10, weight: .medium) : nil)
+                .frame(minWidth: compact ? 16 : nil, minHeight: compact ? 24 : nil)
             }
             .buttonStyle(FleckQuietButtonStyle())
             .accessibilityLabel("Dismiss search")
@@ -808,27 +869,36 @@
             }
           }
 
-          Text(controller.resultCountAccessibilityValue)
-            .font(.caption)
+          Text(
+            compact && controller.isUpdatingResults ? "Updating search results"
+              : compact && (!controller.hasQuery || controller.results.isEmpty) ? "0 results"
+              : controller.resultCountAccessibilityValue
+          )
+            .font(compact ? .system(size: 11) : .caption)
             .foregroundStyle(.secondary)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Search result count")
             .accessibilityValue(controller.resultCountAccessibilityValue)
 
-          if controller.results.isEmpty {
-            Text(controller.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-              ? "Type to search notes"
-              : "No matching notes")
-              .font(.callout)
+          if !controller.hasQuery || controller.results.isEmpty {
+            Text(controller.hasQuery ? "No matching notes" : "Type to search notes")
+              .font(compact ? .system(size: 14) : .callout)
               .foregroundStyle(.secondary)
               .padding(.vertical, 8)
+              .opacity(controller.isUpdatingResults ? 0 : 1)
+              .accessibilityHidden(controller.isUpdatingResults)
           } else {
             let resultsAreCurrent = controller.resultsAreCurrent
+            let resultQuery = controller.resultsQuery ?? ""
+            let notesByID = compact ? Dictionary(uniqueKeysWithValues: notes.map { ($0.id, $0) }) : [:]
             ScrollViewReader { scrollProxy in
               ScrollView(.vertical) {
                 LazyVStack(spacing: 2) {
                   ForEach(controller.results) { result in
                     let isSelected = controller.isHighlighted(result.noteID)
+                    let snippet = compact
+                      ? NotesQueryPanelChrome.snippet(for: result, in: notesByID[result.noteID])
+                      : result.snippet
                     Button {
                       _ = controller.activateResult(
                         result.noteID,
@@ -841,47 +911,53 @@
                         Text(
                           workspaceSearchHighlightedAttributedString(
                             result.displayTitle,
-                            query: controller.query,
+                            query: resultQuery,
                             accent: isSelected ? theme.color(.selectionText) : accent,
                             underlineMatches: isSelected
                           )
                         )
-                          .font(.body.weight(.semibold))
+                          .font(compact ? .system(size: 14, weight: .medium) : .body.weight(.semibold))
                           .foregroundStyle(
                             isSelected ? theme.color(.selectionText) : theme.color(.textPrimary)
                           )
                           .lineLimit(1)
                         Text(
                           workspaceSearchHighlightedAttributedString(
-                            result.snippet,
-                            query: controller.query,
-                            accent: isSelected ? theme.color(.selectionText) : accent,
+                            snippet,
+                            query: resultQuery,
+                            accent: compact ? theme.color(.caption)
+                              : isSelected ? theme.color(.selectionText) : accent,
                             underlineMatches: isSelected
                           )
                         )
-                          .font(.caption)
+                          .font(compact ? .system(size: 11) : .caption)
                           .foregroundStyle(
-                            isSelected ? theme.color(.selectionText) : theme.color(.caption)
+                            isSelected && !compact ? theme.color(.selectionText) : theme.color(.caption)
                           )
                           .lineLimit(2)
                       }
                       .frame(maxWidth: .infinity, alignment: .leading)
                       .padding(.horizontal, 8)
                       .padding(.vertical, compact ? 9 : 6)
-                      .background(
-                        RoundedRectangle(cornerRadius: 6)
-                          .fill(isSelected ? theme.color(.selectionFill) : .clear)
-                      )
+                      .frame(minHeight: compact ? 50 : nil, alignment: .leading)
+                      .background {
+                        if isSelected {
+                          RoundedRectangle(cornerRadius: 6).fill(
+                            compact ? NotesQueryPanelChrome.searchSelection : theme.color(.selectionFill)
+                          )
+                        }
+                      }
+                      .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .focusable()
+                    .focusable(resultsAreCurrent)
                     .id(result.noteID)
-                    .accessibilityLabel("\(result.displayTitle), \(result.snippet)")
+                    .accessibilityLabel(snippet.isEmpty ? result.displayTitle : "\(result.displayTitle), \(snippet)")
                     .accessibilityValue(isSelected ? "Selected" : "Not selected")
                     .accessibilityAddTraits(isSelected ? .isSelected : [])
                     .accessibilityHint(resultsAreCurrent ? "" : "Updating search results")
                     .disabled(!resultsAreCurrent)
-                    .opacity(resultsAreCurrent ? 1 : 0.65)
+                    .opacity(resultsAreCurrent || compact ? 1 : 0.65)
                     .onKeyPress(.upArrow) {
                       controller.moveHighlight(.up)
                       return .handled
@@ -910,13 +986,7 @@
         }
         .padding(12)
         .frame(maxWidth: 360, alignment: .leading)
-        .fleckThemedSurface(cornerRadius: 10)
-        .overlay {
-          RoundedRectangle(cornerRadius: 10)
-            .strokeBorder(.quaternary)
-            .accessibilityHidden(true)
-            .allowsHitTesting(false)
-        }
+        .modifier(NotesQueryPanelChrome(solid: solid, cornerRadius: 10))
         .shadow(color: .black.opacity(0.14), radius: 8, y: 4)
         .padding(.horizontal, 10)
         .padding(.top, 8)
@@ -946,8 +1016,8 @@
         isQueryFocused = true
         controller.refresh(in: notes)
       }
-      .onChange(of: controller.query) { _, newQuery in
-        controller.setQuery(newQuery, in: notes)
+      .onChange(of: controller.query) {
+        controller.refresh(in: notes)
       }
       .onChange(of: notes) { _, newNotes in
         controller.refresh(in: newNotes)

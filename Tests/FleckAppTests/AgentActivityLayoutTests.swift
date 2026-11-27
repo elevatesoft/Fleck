@@ -83,18 +83,24 @@
         "FLECK_AGENT_ACTIVITY_CAPTURE_PREFIX"
       ] ?? "agent-activity"
 
-      for (name, size, content, scheme, typeSize, populated) in [
+      for (name, size, content, scheme, typeSize, populated, usesNotesChrome) in [
         ("light", NSSize(width: 520, height: 380), ActivityContent.minimum,
-          ColorScheme.light, DynamicTypeSize.large, false),
-        ("dark", NSSize(width: 520, height: 380), .minimum, .dark, .large, false),
+          ColorScheme.light, DynamicTypeSize.large, false, false),
+        ("dark", NSSize(width: 520, height: 380), .minimum, .dark, .large, false, false),
         ("larger-text", NSSize(width: 520, height: 380), .minimum,
-          .light, .accessibility5, false),
-        ("enlarged", NSSize(width: 720, height: 520), .minimum, .light, .large, false),
+          .light, .accessibility5, false, false),
+        ("enlarged", NSSize(width: 720, height: 520), .minimum, .light, .large, false, false),
         ("overlay-compact", NSSize(width: 380, height: 300), .overlay,
-          .light, .large, false),
+          .light, .large, false, false),
         ("overlay-large", NSSize(width: 800, height: 430), .overlay,
-          .light, .large, false),
-        ("populated", NSSize(width: 520, height: 380), .minimum, .light, .large, true),
+          .light, .large, false, false),
+        ("populated", NSSize(width: 520, height: 380), .minimum, .light, .large, true, false),
+        ("notes-dark-solid-empty", NSSize(width: 520, height: 380), .minimum,
+          .dark, .large, false, true),
+        ("notes-dark-solid-compact", NSSize(width: 380, height: 300), .overlay,
+          .dark, .accessibility5, true, true),
+        ("notes-dark-solid-populated", NSSize(width: 686, height: 436), .overlay,
+          .dark, .large, true, true),
       ] {
         let fixture = try await makeFixture(populated: populated)
         defer { fixture.remove() }
@@ -103,7 +109,8 @@
           size: size,
           content: content,
           colorScheme: scheme,
-          dynamicTypeSize: typeSize
+          dynamicTypeSize: typeSize,
+          usesNotesChrome: usesNotesChrome
         )
         defer { hosted.remove() }
         #expect(!hosted.window.isVisible)
@@ -116,10 +123,11 @@
           try fixture.activityStore.clearVisibleActivity()
           fixture.state.refreshAgentActivity()
           await settle(hosted.host)
+          let cleared = usesNotesChrome ? "\(name)-after-clear" : "transitioned-empty"
           try capture(
             hosted.host,
             at: URL(fileURLWithPath: directory)
-              .appendingPathComponent("\(prefix)-transitioned-empty.png")
+              .appendingPathComponent("\(prefix)-\(cleared).png")
           )
         }
       }
@@ -177,14 +185,24 @@
       size: NSSize,
       content: ActivityContent,
       colorScheme: ColorScheme = .light,
-      dynamicTypeSize: DynamicTypeSize = .large
+      dynamicTypeSize: DynamicTypeSize = .large,
+      usesNotesChrome: Bool = false
     ) async -> HostedActivity {
       let probe = ActivityFrameProbe()
-      let activity = AgentActivityView(onOpenNote: { _ in }, onDismiss: {})
-        .environmentObject(state)
-        .environment(\.colorScheme, colorScheme)
-        .environment(\.dynamicTypeSize, dynamicTypeSize)
-        .background(ActivityFrameReader(probe: probe))
+      let theme = FleckThemeSnapshot.resolve(
+        colorTheme: .monochrome, mode: colorScheme == .dark ? .dark : .light,
+        systemAppearance: .light, reduceTransparency: false, increasedContrast: false
+      )
+      let activity = AgentActivityView(
+        notesChrome: usesNotesChrome ? NotesSolidChrome(theme: theme, appearance: .solid) : nil,
+        onOpenNote: { _ in },
+        onDismiss: {}
+      )
+      .environmentObject(state)
+      .environment(\.colorScheme, colorScheme)
+      .environment(\.dynamicTypeSize, dynamicTypeSize)
+      .transformEnvironment(\.fleckThemeSnapshot) { if usesNotesChrome { $0 = theme } }
+      .background(ActivityFrameReader(probe: probe))
       let rootView = switch content {
       case .minimum:
         AnyView(activity.frame(minWidth: 520, minHeight: 380))

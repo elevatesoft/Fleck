@@ -42,6 +42,52 @@ struct SaveFeedbackPresentationTests {
   }
 
   @Test
+  func darkSolidNotesThresholdKeepsFastWritesQuiet() {
+    let scheduler = RevealScheduler()
+    let feedback = SaveFeedbackPresentation(scheduleReveal: scheduler.schedule)
+    let delay = SaveFeedbackPresentation.darkSolidNotesRevealDelay
+    let fast = feedback.writeBegan(revealAfter: delay)
+    #expect(scheduler.delays == [.milliseconds(240)])
+    feedback.writeEnded(fast)
+    feedback.settle(.saved)
+    scheduler.fireAll()
+    #expect(feedback.state == .saved)
+
+    let slow = feedback.writeBegan(revealAfter: delay)
+    #expect(feedback.state == .pending)
+    scheduler.fireAll()
+    #expect(feedback.state == .saving)
+    feedback.writeEnded(slow)
+    feedback.settle(.saved)
+    #expect(feedback.state == .saved)
+  }
+
+  @Test
+  func suspendedWriteChoosesRevealDelayForTheCurrentlyVisibleAppearance() async throws {
+    let scheduler = RevealScheduler()
+    let feedback = SaveFeedbackPresentation(scheduleReveal: scheduler.schedule)
+    let beforeWrite = PersistenceWriteGate()
+    var preferences = AppPreferences()
+    preferences.theme = .dark
+    preferences.colorTheme = .monochrome
+    preferences.chromeAppearance = .solid
+    let fixture = try await SaveFeedbackFixture(
+      feedback: feedback,
+      initialPreferences: preferences,
+      beforeSaveOperation: { await beforeWrite.holdOnlyFirstWrite() }
+    ) { _, _, _, _ in .committed }
+    defer { fixture.remove() }
+
+    let pending = fixture.state.saveNow()
+    await beforeWrite.waitUntilStarted(1)
+    fixture.state.updatePreferences { $0.chromeAppearance = .glass }
+    await beforeWrite.releaseNext()
+    try await pending.value
+    #expect(scheduler.delays.first == .milliseconds(800))
+    await fixture.state.quiescePersistenceForTesting()
+  }
+
+  @Test
   func slowWriteRevealsSavingOnlyAfterTheThreshold() {
     let scheduler = RevealScheduler()
     let feedback = SaveFeedbackPresentation(scheduleReveal: scheduler.schedule)
@@ -247,12 +293,18 @@ struct SaveFeedbackPresentationTests {
     #expect(feedback.state == .saved)
   }
 
-  @Test
-  func slowWriteRevealsSavingFromTheActualWrite() async throws {
+  @Test(arguments: [AppTheme.light, .dark])
+  func slowWriteRevealsSavingFromTheActualWrite(theme: AppTheme) async throws {
     let scheduler = RevealScheduler()
     let feedback = SaveFeedbackPresentation(scheduleReveal: scheduler.schedule)
     let gate = PersistenceWriteGate()
-    let fixture = try await SaveFeedbackFixture(feedback: feedback) { _, _, _, _ in
+    var preferences = AppPreferences()
+    preferences.theme = theme
+    preferences.colorTheme = .monochrome
+    preferences.chromeAppearance = .solid
+    let fixture = try await SaveFeedbackFixture(
+      feedback: feedback, initialPreferences: preferences
+    ) { _, _, _, _ in
       await gate.save()
     }
     defer { fixture.remove() }
@@ -263,7 +315,10 @@ struct SaveFeedbackPresentationTests {
 
     await gate.waitUntilStarted(1)
     #expect(feedback.state == .pending)
-    #expect(scheduler.delays == [SaveFeedbackPresentation.revealDelay])
+    #expect(scheduler.delays == [
+      theme == .dark ? SaveFeedbackPresentation.darkSolidNotesRevealDelay
+        : SaveFeedbackPresentation.revealDelay
+    ])
 
     scheduler.fireAll()
     #expect(feedback.state == .saving)
@@ -441,6 +496,8 @@ private struct SaveFeedbackFixture {
 
   init(
     feedback: SaveFeedbackPresentation = SaveFeedbackPresentation(),
+    initialPreferences: AppPreferences = .init(),
+    beforeSaveOperation: AppState.BeforeSaveOperation? = nil,
     loadTrashOperation: AppState.LoadTrashOperation? = nil,
     saveOperation: @escaping AppState.SaveOperation
   ) async throws {
@@ -450,12 +507,13 @@ private struct SaveFeedbackFixture {
     let store = LocalStore(rootURL: root)
     try await store.save(
       workspace: Workspace(notes: [note], selectedNoteID: note.id, folders: []),
-      preferences: .init()
+      preferences: initialPreferences
     )
     state = AppState(
       store: store,
       saveOperation: saveOperation,
       saveFeedback: feedback,
+      beforeSaveOperation: beforeSaveOperation,
       loadTrashOperation: loadTrashOperation
     )
     await state.waitUntilInitialLoad()
@@ -498,6 +556,14 @@ private enum SaveFeedbackTestError: Error {
 }
 
 private actor PersistenceWriteGate {
+  private var hasHeldFirstWrite = false
+
+  func holdOnlyFirstWrite() async {
+    guard !hasHeldFirstWrite else { return }
+    hasHeldFirstWrite = true
+    _ = await save()
+  }
+
   private var started = 0
   private var startedContinuation: CheckedContinuation<Void, Never>?
   private var openWrites: [CheckedContinuation<LocalStoreSnapshotWriteResult, Never>] = []

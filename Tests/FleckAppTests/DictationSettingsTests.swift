@@ -3566,6 +3566,42 @@ func hostedNotesPanelOmitsActiveDestinationGuideForFocusedAndSmartCapture()
   #expect(source.contains("await dictationRuntime.performModifierShortcutRecovery"))
 }
 
+@Test @MainActor
+func darkNotesInputMonitoringDismissalDoesNotTreatRefreshOrReleaseAsAnotherAttempt() async throws {
+  let fixture = try await RuntimeFixture(
+    finalText: nil, monitorAccessGranted: false, monitorRequestAccessResult: false
+  )
+  let runtime = try #require(fixture.runtime)
+  await runtime.awaitStartupAssessment()
+  await runtime.shortcutController.drainEvents()
+  let requests = fixture.monitor.requestCount
+  let selected = fixture.appState.preferences.dictationModifierKey
+  #expect(selected == .rightOption)
+  #expect(runtime.modifierMonitorState == .unauthorized)
+  #expect(!runtime.isInputMonitoringNoticeDismissed)
+
+  runtime.dismissInputMonitoringNotice()
+  runtime.preferencesDidChange()
+  fixture.monitor.publish(.stopped)
+  fixture.monitor.publish(.unauthorized)
+  await runtime.shortcutController.drainEvents()
+  #expect(runtime.isInputMonitoringNoticeDismissed)
+  runtime.observeLocalModifierAttempt(.leftOption)
+  #expect(runtime.isInputMonitoringNoticeDismissed)
+
+  let decode = NotesModifierAttemptObserver.ModifierEventView.pressedModifier
+  #expect(decode(0x3D, .option) == nil)
+  #expect(decode(0x3D, .init(rawValue: NSEvent.ModifierFlags.option.rawValue | 0x20)) == nil)
+  let press = try #require(decode(0x3D, .init(rawValue: NSEvent.ModifierFlags.option.rawValue | 0x40)))
+  runtime.observeLocalModifierAttempt(press)
+  #expect(!runtime.isInputMonitoringNoticeDismissed)
+  #expect(runtime.modifierMonitorState == .unauthorized)
+  #expect(fixture.monitor.requestCount == requests)
+  #expect(fixture.appState.preferences.dictationModifierKey == selected)
+  #expect(runtime.captureFailure == nil)
+  await runtime.shutdown()
+}
+
 @Test func notesPanelBannerPolicyOmitsRoutineUndoWhileKeepingFailures() {
   let captureFailure = NotesPanelBannerOccurrence.captureFailure(
     message: "Microphone permission is required",

@@ -66,9 +66,8 @@
     let minimumTrailingSpacing: CGFloat
     let pinsOverflowToTrailing: Bool
     let onVisibleCountChange: (Int) -> Void
-    let trailingOverflowGeometry: (coordinateSpace: String, onChange: (CGRect) -> Void)?
     @ViewBuilder let item: (Int, Bool) -> Item
-    @ViewBuilder let overflow: (Range<Int>) -> Overflow
+    @ViewBuilder let overflow: (Range<Int>, Bool) -> Overflow
     @ViewBuilder let trailing: (Bool) -> Trailing
     @State private var widths: [Int: CGFloat] = [:]
 
@@ -78,9 +77,8 @@
       minimumTrailingSpacing: CGFloat,
       pinsOverflowToTrailing: Bool = false,
       onVisibleCountChange: @escaping (Int) -> Void = { _ in },
-      trailingOverflowGeometry: (coordinateSpace: String, onChange: (CGRect) -> Void)? = nil,
       @ViewBuilder item: @escaping (Int, Bool) -> Item,
-      @ViewBuilder overflow: @escaping (Range<Int>) -> Overflow,
+      @ViewBuilder overflow: @escaping (Range<Int>, Bool) -> Overflow,
       @ViewBuilder trailing: @escaping (Bool) -> Trailing
     ) {
       self.itemCount = itemCount
@@ -88,30 +86,23 @@
       self.minimumTrailingSpacing = minimumTrailingSpacing
       self.pinsOverflowToTrailing = pinsOverflowToTrailing
       self.onVisibleCountChange = onVisibleCountChange
-      self.trailingOverflowGeometry = trailingOverflowGeometry
       self.item = item
       self.overflow = overflow
       self.trailing = trailing
     }
 
     var body: some View {
-      let coordinateSpace = trailingOverflowGeometry?.coordinateSpace
       GeometryReader { geometry in
         let count = visibleCount(at: geometry.size.width)
         HStack(spacing: 0) {
           HStack(spacing: spacing) {
             ForEach(0..<count, id: \.self) { item($0, false) }
-            if count < itemCount && !pinsOverflowToTrailing { overflow(count..<itemCount) }
+            if count < itemCount && !pinsOverflowToTrailing { overflow(count..<itemCount, false) }
           }
           .fixedSize(horizontal: true, vertical: false)
           Spacer(minLength: minimumTrailingSpacing)
           if count < itemCount && pinsOverflowToTrailing {
-            overflow(count..<itemCount)
-              .onGeometryChange(for: CGRect.self) { proxy in
-                coordinateSpace.map { proxy.frame(in: .named($0)) } ?? .null
-              } action: { frame in
-                trailingOverflowGeometry?.onChange(frame)
-              }
+            overflow(count..<itemCount, false)
               .fixedSize(horizontal: true, vertical: false)
               .padding(.trailing, spacing)
           }
@@ -125,7 +116,7 @@
           ForEach(0..<itemCount, id: \.self) { index in
             measure(index, item(index, true))
           }
-          if itemCount > 0 { measure(itemCount, overflow(0..<itemCount)) }
+          if itemCount > 0 { measure(itemCount, overflow(0..<itemCount, true)) }
           measure(itemCount + 1, trailing(true))
         }
         .fixedSize(horizontal: true, vertical: false)

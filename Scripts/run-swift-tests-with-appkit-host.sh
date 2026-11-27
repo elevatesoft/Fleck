@@ -326,11 +326,27 @@ terminate_open_child() {
 
 watch_host() {
   local open_pid="$1"
+  local mode="$2"
   local started_seconds="$SECONDS"
+  local next_report="$SECONDS"
+  local pid rss output_bytes
   trap '' HUP INT TERM
   while (( SECONDS - started_seconds < host_watchdog_seconds )); do
     [[ -e "$active_completion_path" ]] && return 0
     /bin/kill -0 "$open_pid" 2>/dev/null || return 0
+    if [[ "${GITHUB_ACTIONS:-}" = true && "$mode" = run ]] &&
+      (( SECONDS >= next_report )); then
+      rss=unavailable
+      if pid="$(read_owned_host_pid)" && owned_host_is_running "$pid"; then
+        rss="$(/bin/ps -p "$pid" -o rss= 2>/dev/null | /usr/bin/tr -d '[:space:]')" ||
+          rss=unavailable
+      fi
+      output_bytes="$(/usr/bin/stat -f '%z' "$active_host_log_path" 2>/dev/null)" ||
+        output_bytes=unavailable
+      printf 'AppKit CI progress: elapsed=%ss host_rss_kib=%s output_bytes=%s\n' \
+        "$((SECONDS - started_seconds))" "${rss:-unavailable}" "$output_bytes" >&3 || true
+      next_report=$((SECONDS + 60))
+    fi
     /bin/sleep 1
   done
   [[ -e "$active_completion_path" ]] && return 0
@@ -441,7 +457,7 @@ launch_host() {
 
   "$open_path" "${open_arguments[@]}" 8>&- > "$open_log_path" 2>&1 &
   active_open_pid=$!
-  watch_host "$active_open_pid" 8>&- &
+  watch_host "$active_open_pid" "$mode" 3>&8 8>&- &
   active_watchdog_pid=$!
 
   set +e

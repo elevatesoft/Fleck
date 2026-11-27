@@ -342,14 +342,14 @@
       """
     }
 
-    private static func actorName(_ actor: AgentActivityActor) -> String {
+    static func actorName(_ actor: AgentActivityActor) -> String {
       switch actor {
       case .integration(_, let displayName): displayName
       case .localUser: "Fleck"
       }
     }
 
-    private static func operationName(_ operation: AgentActivityOperation) -> String {
+    static func operationName(_ operation: AgentActivityOperation) -> String {
       switch operation {
       case .appendText: "Appended text"
       case .insertText: "Inserted text"
@@ -363,76 +363,424 @@
     }
   }
 
+  struct AgentActivityNoteFilter {
+    let notes: [Note]
+    let selectedNoteID: UUID?
+
+    var selectedNote: Note? {
+      guard let selectedNoteID else { return nil }
+      return notes.first { $0.id == selectedNoteID }
+    }
+
+    func records(from activity: [AgentActivityRecord]) -> [AgentActivityRecord] {
+      guard let selectedNote else { return activity }
+      return activity.filter { $0.noteID == selectedNote.id }
+    }
+  }
+
   struct AgentActivityView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.fleckThemeSnapshot) private var theme
+    var notesChrome: NotesSolidChrome?
     let onOpenNote: (UUID) -> Void
     let onDismiss: () -> Void
     @State private var showsClearConfirmation = false
+    @State private var selectedNoteID: UUID?
+    @FocusState private var focusedControl: Control?
+
+    private enum Control: Hashable {
+      case clear, done, cancelClear, confirmClear
+    }
+
+    private let clearTitle: LocalizedStringKey = "Clear Agent Activity?"
+    private let clearMessage: LocalizedStringKey =
+      "Visible patches are removed. Retry-protection tombstones remain until expiry."
+
+    private var showsSolidClear: Bool {
+      notesChrome != nil && showsClearConfirmation
+    }
+
+    private var noteFilter: AgentActivityNoteFilter {
+      AgentActivityNoteFilter(
+        notes: appState.workspace.notes, selectedNoteID: notesChrome == nil ? nil : selectedNoteID
+      )
+    }
 
     var body: some View {
-      VStack(alignment: .leading, spacing: 12) {
-        HStack {
-          Text("Agent Activity").font(.title2.weight(.semibold))
-          Spacer()
-          Button("Clear Activity", role: .destructive) {
-            showsClearConfirmation = true
+      let records = noteFilter.records(from: appState.agentActivity)
+      let isFiltered = noteFilter.selectedNote != nil
+      VStack(alignment: .leading, spacing: notesChrome == nil ? 12 : 0) {
+        if let notesChrome {
+          solidHeader(notesChrome, shownCount: records.count, isFiltered: isFiltered)
+          notePicker(notesChrome)
+        } else {
+          HStack {
+            Text("Agent Activity").font(.title2.weight(.semibold))
+            Spacer()
+            Button("Clear Activity", role: .destructive) {
+              showsClearConfirmation = true
+            }
+            .disabled(appState.agentActivity.isEmpty)
+            Button("Done", action: onDismiss)
+              .keyboardShortcut(.cancelAction)
+              .accessibilityLabel("Close Agent Activity")
           }
-          .disabled(appState.agentActivity.isEmpty)
-          Button("Done") {
-            onDismiss()
-          }
-          .keyboardShortcut(.cancelAction)
-          .accessibilityLabel("Close Agent Activity")
-        }
-        .padding(.horizontal, 18)
-
-        if appState.agentActivity.isEmpty {
-          ContentUnavailableView(
-            "No Agent Activity",
-            systemImage: "point.3.connected.trianglepath.dotted",
-            description: Text("Changes made by authorized integrations appear here.")
-          )
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
           .padding(.horizontal, 18)
-          .padding(.bottom, 18)
+        }
+
+        if records.isEmpty {
+          emptyActivity(isFiltered: isFiltered)
         } else {
           ScrollView {
             LazyVStack(alignment: .leading, spacing: 10) {
-              ForEach(rows) { row in
-                activityRow(row)
+              ForEach(records, id: \.changeID) { record in
+                AgentActivityEntryView(
+                  notesChrome: notesChrome, record: record, onOpenNote: onOpenNote
+                )
               }
             }
             .padding(.horizontal, 18)
+            .padding(.top, notesChrome == nil ? 0 : 12)
             .background(AgentActivityScrollViewConfigurator())
           }
           .padding(.bottom, 18)
         }
       }
-      .padding(.top, 18)
+      .padding(.top, notesChrome == nil ? 18 : 0)
+      .disabled(showsSolidClear)
+      .allowsHitTesting(!showsSolidClear)
+      .accessibilityHidden(showsSolidClear)
+      .background {
+        if let notesChrome { notesChrome.dialogSurface }
+      }
+      .overlay {
+        if let notesChrome, showsSolidClear {
+          solidClearConfirmation(notesChrome)
+        }
+      }
+      .onChange(of: showsSolidClear) { _, isPresented in
+        focusedControl = isPresented ? .cancelClear : appState.agentActivity.isEmpty ? .done : .clear
+      }
+      .onChange(of: noteFilter.selectedNote?.id) { _, noteID in
+        if noteID == nil { selectedNoteID = nil }
+      }
       .task { appState.refreshAgentActivity() }
       .confirmationDialog(
-        "Clear Agent Activity?",
-        isPresented: $showsClearConfirmation
+        clearTitle,
+        isPresented: Binding(
+          get: { notesChrome == nil && showsClearConfirmation },
+          set: { if notesChrome == nil { showsClearConfirmation = $0 } }
+        )
       ) {
-        Button("Clear Activity", role: .destructive) {
-          appState.clearAgentActivity()
-        }
+        Button("Clear Activity", role: .destructive, action: clearActivity)
         Button("Cancel", role: .cancel) {}
       } message: {
-        Text("Visible patches are removed. Retry-protection tombstones remain until expiry.")
+        Text(clearMessage)
       }
     }
 
-    private var rows: [AgentActivityRowPresentation] {
-      let profiles = Set(appState.agentProfiles.map(\.id))
-      return appState.agentActivity.map { record in
-        AgentActivityRowPresentation(
-          record: record,
-          activeNote: appState.workspace.notes.first { $0.id == record.noteID },
-          activeProfileIDs: profiles
-        )
+    private func solidHeader(
+      _ chrome: NotesSolidChrome, shownCount: Int, isFiltered: Bool
+    ) -> some View {
+      let count = appState.agentActivity.count
+      return HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 3) {
+          Text("Agent Activity")
+            .fleckUIFont(.title2, weight: .semibold)
+            .foregroundStyle(theme.color(.textPrimary))
+            .accessibilityAddTraits(.isHeader)
+          Text(isFiltered
+            ? "\(shownCount) of \(count) changes"
+            : (count == 1 ? "1 change" : "\(count) changes"))
+            .fleckUIFont(.caption)
+            .monospacedDigit()
+            .foregroundStyle(theme.color(.textSecondary))
+        }
+        Spacer(minLength: 8)
+        solidButton("Clear Activity", control: .clear, role: .destructive, chrome: chrome) {
+          showsClearConfirmation = true
+        }
+        .disabled(count == 0)
+        solidButton("Done", control: .done, chrome: chrome, action: onDismiss)
+          .keyboardShortcut(showsSolidClear ? nil : .cancelAction)
+          .accessibilityLabel("Close Agent Activity")
       }
+      .padding(.horizontal, 18)
+      .padding(.vertical, 12)
+      .background(chrome.dialogHeader)
+      .overlay(alignment: .bottom) {
+        Rectangle()
+          .fill(chrome.dialogSeparator)
+          .frame(height: 1)
+          .allowsHitTesting(false)
+          .accessibilityHidden(true)
+      }
+    }
+
+    private func notePicker(_ chrome: NotesSolidChrome) -> some View {
+      Picker("Note", selection: $selectedNoteID) {
+        Text("All Notes").tag(UUID?.none)
+        ForEach(noteFilter.notes) { note in
+          let folder = appState.workspace.folders.first { $0.id == note.folderID }?.name
+          Text(folder.map { "\(note.displayTitle) — \($0)" } ?? note.displayTitle)
+            .tag(Optional(note.id))
+        }
+      }
+      .pickerStyle(.menu)
+      .accessibilityIdentifier("notes-agent-activity-note-filter")
+      .padding(.horizontal, 18)
+      .padding(.vertical, 8)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(chrome.dialogHeader)
+      .overlay(alignment: .bottom) {
+        Rectangle()
+          .fill(chrome.dialogSeparator)
+          .frame(height: 1)
+          .allowsHitTesting(false)
+          .accessibilityHidden(true)
+      }
+    }
+
+    private func emptyActivity(isFiltered: Bool) -> some View {
+      let placeholder = ContentUnavailableView(
+        isFiltered ? "No Matching Activity" : "No Agent Activity",
+        systemImage: "point.3.connected.trianglepath.dotted",
+        description: Text(isFiltered
+          ? "No changes were recorded for this note."
+          : "Changes made by authorized integrations appear here.")
+      )
+      return Group {
+        if notesChrome == nil {
+          placeholder
+        } else {
+          placeholder.foregroundStyle(theme.color(.textSecondary))
+        }
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .padding(.horizontal, 18)
+      .padding(.bottom, 18)
+    }
+
+    private func solidClearConfirmation(_ chrome: NotesSolidChrome) -> some View {
+      let shape = RoundedRectangle(cornerRadius: 12)
+      return ZStack {
+        Color.black.opacity(0.55)
+          .accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: 12) {
+          Text(clearTitle)
+            .fleckUIFont(.headline)
+            .foregroundStyle(theme.color(.textPrimary))
+            .accessibilityAddTraits(.isHeader)
+          Text(
+            "This clears patches for all notes, regardless of the filter. Retry-protection tombstones remain until expiry."
+          )
+          .fleckUIFont(.callout)
+          .foregroundStyle(theme.color(.textSecondary))
+          .fixedSize(horizontal: false, vertical: true)
+          HStack(spacing: 8) {
+            Spacer(minLength: 0)
+            solidButton("Cancel", control: .cancelClear, role: .cancel, chrome: chrome) {
+              showsClearConfirmation = false
+            }
+            .keyboardShortcut(.cancelAction)
+            solidButton(
+              "Clear Activity", control: .confirmClear, role: .destructive,
+              chrome: chrome, action: clearActivity
+            )
+          }
+        }
+        .padding(18)
+        .frame(maxWidth: 340)
+        .background(chrome.dialogHeader, in: shape)
+        .overlay {
+          shape.strokeBorder(chrome.outline, lineWidth: 1)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+        .shadow(radius: 14, y: 6)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("notes-agent-activity-clear-confirmation")
+        .padding(12)
+      }
+    }
+
+    private func solidButton(
+      _ title: LocalizedStringKey,
+      control: Control,
+      role: ButtonRole? = nil,
+      chrome: NotesSolidChrome,
+      action: @escaping () -> Void
+    ) -> some View {
+      let isDestructive = role == .destructive
+      let isDone = control == .done
+      let isDisabled = control == .clear && appState.agentActivity.isEmpty
+      return Button(title, role: role, action: action)
+        .buttonStyle(NotesSolidActionStyle(
+          width: isDestructive ? 90 : 58,
+          height: 30,
+          ink: theme.color(
+            isDisabled ? .caption : isDone ? .accentText : isDestructive ? .error : .textPrimary
+          ),
+          surface: isDone ? theme.color(.accent) : chrome.toolbarField,
+          outline: isDone ? .clear : chrome.outline
+        ))
+        .focused($focusedControl, equals: control)
+        .fleckNeutralControlOutline(isFocused: focusedControl == control, cornerRadius: 6)
+    }
+
+    private func clearActivity() {
+      appState.clearAgentActivity()
+      showsClearConfirmation = false
+    }
+  }
+
+  struct AgentActivityInboxView: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.fleckThemeSnapshot) private var theme
+    let chrome: NotesSolidChrome
+    let onOpenHistory: () -> Void
+    let onOpenNote: (UUID) -> Void
+    @State private var selectedChangeID: UUID?
+    @State private var readIDs: Set<UUID> = []
+
+    private var inboxRecords: [AgentActivityRecord] {
+      let noteIDs = Set(appState.workspace.notes.map(\.id))
+      return Array(appState.agentActivity.lazy.filter { noteIDs.contains($0.noteID) }.prefix(50))
+    }
+
+    var body: some View {
+      let records = inboxRecords
+      let selectedRecord = records.first { $0.changeID == selectedChangeID }
+      VStack(alignment: .leading, spacing: 0) {
+        HStack {
+          if selectedRecord != nil {
+            Button("Back") { selectedChangeID = nil }
+          }
+          Text("Activity Inbox")
+            .fleckUIFont(.title2, weight: .semibold)
+            .foregroundStyle(theme.color(.textPrimary))
+            .accessibilityAddTraits(.isHeader)
+          Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(chrome.dialogHeader)
+
+        separator
+        if let selectedRecord {
+          ScrollView {
+            AgentActivityEntryView(
+              notesChrome: chrome, record: selectedRecord, onOpenNote: onOpenNote
+            )
+            .padding(10)
+          }
+          .frame(height: 230)
+          .accessibilityIdentifier("notes-activity-inbox-detail")
+          .task(id: selectedRecord.changeID) {
+            guard !Task.isCancelled,
+              appState.agentActivityStore.markInboxRecordRead(id: selectedRecord.changeID)
+            else { return }
+            readIDs = appState.agentActivityStore.inboxReadIDs()
+          }
+        } else if records.isEmpty {
+          VStack(alignment: .leading, spacing: 4) {
+            Text("No Recent Activity").fleckUIFont(.headline)
+            Text("Changes made by authorized integrations appear here.")
+              .fleckUIFont(.callout)
+              .foregroundStyle(theme.color(.textSecondary))
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(16)
+        } else {
+          ScrollView {
+            LazyVStack(alignment: .leading, spacing: 2) {
+              ForEach(records, id: \.changeID) { record in
+                inboxRow(record)
+              }
+            }
+            .padding(8)
+          }
+          .frame(height: 200)
+        }
+        separator
+
+        Button("Open Agent Activity", action: onOpenHistory)
+          .padding(12)
+          .frame(maxWidth: .infinity, alignment: .leading)
+      }
+      .frame(width: 350)
+      .background(chrome.dialogSurface)
+      .accessibilityElement(children: .contain)
+      .accessibilityIdentifier("notes-activity-inbox")
+      .task {
+        appState.refreshAgentActivity()
+        readIDs = appState.agentActivityStore.inboxReadIDs()
+      }
+      .onChange(of: selectedRecord?.changeID) { _, changeID in
+        if changeID == nil { selectedChangeID = nil }
+      }
+    }
+
+    private var separator: some View {
+      Rectangle()
+        .fill(chrome.dialogSeparator)
+        .frame(height: 1)
+        .accessibilityHidden(true)
+    }
+
+    private func inboxRow(_ record: AgentActivityRecord) -> some View {
+      let isRead = readIDs.contains(record.changeID)
+      let actor = AgentActivityRowPresentation.actorName(record.actor)
+      let operation = AgentActivityRowPresentation.operationName(record.operation)
+      return Button {
+        selectedChangeID = record.changeID
+      } label: {
+        HStack(spacing: 8) {
+          Circle()
+            .fill(isRead ? .clear : theme.color(.accent))
+            .frame(width: 6, height: 6)
+            .accessibilityHidden(true)
+          VStack(alignment: .leading, spacing: 3) {
+            Text(record.noteTitle)
+              .fleckUIFont(.headline)
+              .foregroundStyle(theme.color(.textPrimary))
+              .lineLimit(1)
+            Text("\(actor) · \(operation)")
+              .fleckUIFont(.caption)
+              .foregroundStyle(theme.color(.textSecondary))
+              .lineLimit(1)
+          }
+          Spacer(minLength: 4)
+          Text(record.createdAt, style: .relative)
+            .fleckUIFont(.caption)
+            .foregroundStyle(theme.color(.caption))
+          Image(systemName: "chevron.right")
+            .font(.caption)
+            .foregroundStyle(theme.color(.caption))
+            .accessibilityHidden(true)
+        }
+        .padding(8)
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .fleckHoverFill(in: RoundedRectangle(cornerRadius: 6))
+      .accessibilityIdentifier("notes-activity-inbox-row-\(record.changeID.uuidString)")
+      .accessibilityValue(isRead ? "Read" : "Unread")
+    }
+  }
+
+  struct AgentActivityEntryView: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.fleckThemeSnapshot) private var theme
+    let notesChrome: NotesSolidChrome?
+    let record: AgentActivityRecord
+    let onOpenNote: (UUID) -> Void
+
+    var body: some View {
+      activityRow(AgentActivityRowPresentation(
+        record: record,
+        activeNote: appState.workspace.notes.first { $0.id == record.noteID },
+        activeProfileIDs: Set(appState.agentProfiles.map(\.id))
+      ))
     }
 
     private func activityRow(_ row: AgentActivityRowPresentation) -> some View {
@@ -471,7 +819,15 @@
         }
       }
       .padding(12)
-      .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
+      .background {
+        let shape = RoundedRectangle(cornerRadius: 10)
+        if let notesChrome {
+          shape.fill(notesChrome.dialogHeader)
+          shape.strokeBorder(notesChrome.dialogSeparator, lineWidth: 1)
+        } else {
+          shape.fill(.quaternary.opacity(0.35))
+        }
+      }
     }
 
     private func diff(_ lines: [AgentActivityDiffLine]) -> some View {

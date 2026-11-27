@@ -95,6 +95,7 @@ public struct AgentActivityRecord: Codable, Equatable, Sendable {
 
 public final class AgentActivityStore: @unchecked Sendable {
   public static let retentionInterval: TimeInterval = 30 * 24 * 60 * 60
+  static let inboxReadLimit = 1_024
 
   private struct Tombstone: Codable, Equatable, Sendable {
     let changeID: UUID
@@ -239,6 +240,34 @@ public final class AgentActivityStore: @unchecked Sendable {
     }
   }
 
+  public func inboxReadIDs() -> Set<UUID> {
+    lock.withLock { Set(loadInboxReadIDs()) }
+  }
+
+  @discardableResult
+  public func markInboxRecordRead(id: UUID) -> Bool {
+    lock.withLock {
+      guard
+        let record = validEntry(
+          AgentActivityRecord.self, id: id, kind: .records, embeddedID: \.changeID
+        ),
+        recordIsCoherent(record),
+        record.expiresAt > now()
+      else { return false }
+
+      var ids = loadInboxReadIDs()
+      guard !ids.contains(id) else { return true }
+      ids.append(id)
+      do {
+        let data = try JSONEncoder().encode(Array(ids.suffix(Self.inboxReadLimit)))
+        try data.write(to: inboxReadURL, options: .atomic)
+        return true
+      } catch {
+        return false
+      }
+    }
+  }
+
   public func clearVisibleActivity() throws {
     try lock.withLock {
       try ensureDirectories()
@@ -246,7 +275,32 @@ public final class AgentActivityStore: @unchecked Sendable {
       for url in try entryURLs(kind: .records) {
         try removeItem(url)
       }
+      if fileManager.fileExists(atPath: inboxReadURL.path) {
+        try? removeItem(inboxReadURL)
+      }
     }
+  }
+
+  private var inboxReadURL: URL {
+    activityURL.appendingPathComponent("InboxReadIDs.json")
+  }
+
+  private func loadInboxReadIDs() -> [UUID] {
+    let maximumSize = Self.inboxReadLimit * 40 + 2
+    guard
+      let values = try? inboxReadURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]),
+      values.isRegularFile == true,
+      values.isSymbolicLink == false,
+      let handle = try? FileHandle(forReadingFrom: inboxReadURL)
+    else { return [] }
+    defer { try? handle.close() }
+    guard
+      let data = try? handle.read(upToCount: maximumSize + 1),
+      data.count <= maximumSize,
+      let ids = try? JSONDecoder().decode([UUID].self, from: data),
+      ids.count <= Self.inboxReadLimit
+    else { return [] }
+    return ids
   }
 
   public func reconcile(

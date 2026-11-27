@@ -45,6 +45,55 @@ import Testing
   #expect(try directoryFiles(root, "AgentActivity/Tombstones").count == 1)
 }
 
+@Test func agentActivityInboxMarksOnlyExistingRecordIDAndClearsAlongsideHistory() throws {
+  let root = temporaryAgentActivityURL()
+  defer { try? FileManager.default.removeItem(at: root) }
+  let store = AgentActivityStore(rootURL: root)
+  let first = preparedTransaction()
+  let second = preparedTransaction(noteID: first.noteID)
+  for transaction in [first, second] {
+    try store.prepare(transaction)
+    try store.commit(changeID: transaction.changeID, receipt: receipt(for: transaction))
+  }
+  #expect(store.inboxReadIDs().isEmpty)
+  #expect(!store.markInboxRecordRead(id: first.operationID))
+  #expect(store.markInboxRecordRead(id: first.changeID))
+
+  let reopened = AgentActivityStore(rootURL: root)
+  #expect(reopened.inboxReadIDs() == [first.changeID])
+  #expect(reopened.markInboxRecordRead(id: first.changeID))
+  #expect(reopened.inboxReadIDs() == [first.changeID])
+  try reopened.clearVisibleActivity()
+
+  #expect(reopened.inboxReadIDs().isEmpty)
+  #expect(!reopened.markInboxRecordRead(id: first.changeID))
+  for transaction in [first, second] {
+    #expect(reopened.record(id: transaction.changeID) == nil)
+    #expect(reopened.priorReceipt(actor: transaction.actor, operationID: transaction.operationID)
+      == receipt(for: transaction))
+  }
+}
+
+@Test func agentActivityInboxReadSidecarIsBoundedAndIgnoresOversizedInput() throws {
+  let root = temporaryAgentActivityURL()
+  defer { try? FileManager.default.removeItem(at: root) }
+  let store = AgentActivityStore(rootURL: root)
+  let sidecar = root.appendingPathComponent("AgentActivity/InboxReadIDs.json")
+  let transaction = preparedTransaction()
+  try store.prepare(transaction)
+  try store.commit(changeID: transaction.changeID, receipt: receipt(for: transaction))
+
+  let oldIDs = (0..<AgentActivityStore.inboxReadLimit).map { _ in UUID() }
+  try JSONEncoder().encode(oldIDs).write(to: sidecar)
+  #expect(store.markInboxRecordRead(id: transaction.changeID))
+  #expect(store.inboxReadIDs() == Set(oldIDs.dropFirst()).union([transaction.changeID]))
+
+  try Data(repeating: 0, count: 100_000).write(to: sidecar)
+  #expect(store.inboxReadIDs().isEmpty)
+  #expect(store.markInboxRecordRead(id: transaction.changeID))
+  #expect(store.inboxReadIDs() == [transaction.changeID])
+}
+
 @Test func agentActivityAttributionPersistsAndDecodesLegacyEntries() throws {
   let root = temporaryAgentActivityURL()
   defer { try? FileManager.default.removeItem(at: root) }

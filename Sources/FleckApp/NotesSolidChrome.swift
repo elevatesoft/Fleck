@@ -21,6 +21,8 @@
       color(increasedContrast ? "#888D92" : "#3B3D40")
     }
 
+    var notesNavigationDivider: Color { increasedContrast ? outline : color("#343638") }
+
     var toolbarSurface: Color { color("#222426") }
     var toolbarOutline: Color { increasedContrast ? outline : color("#303234") }
     var toolbarField: Color { color("#2C2E31") }
@@ -42,6 +44,17 @@
     var historySeparator: Color { increasedContrast ? outline : color("#3B3E43") }
     var historyDone: Color { color("#E1E3E7") }
 
+    func windowEdgePadding(
+      horizontal: CGFloat, bottom: CGFloat = 0, after reserve: EdgeInsets
+    ) -> EdgeInsets {
+      EdgeInsets(
+        top: 0,
+        leading: max(0, horizontal - reserve.leading),
+        bottom: max(0, bottom - reserve.bottom),
+        trailing: max(0, horizontal - reserve.trailing)
+      )
+    }
+
     private func color(_ hex: String) -> Color {
       Color(nsColor: NSColor(hex: hex)!)
     }
@@ -53,11 +66,12 @@
     let ink: Color
     var surface: Color = .clear
     var outline: Color = .clear
+    var fontSize: CGFloat = 13
 
     func makeBody(configuration: Configuration) -> some View {
       let shape = RoundedRectangle(cornerRadius: 6)
       configuration.label
-        .font(.system(size: 13, weight: .medium))
+        .font(.system(size: fontSize, weight: .medium))
         .foregroundStyle(ink)
         .padding(.horizontal, 8)
         .frame(minWidth: width, minHeight: height)

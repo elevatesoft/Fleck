@@ -71,6 +71,7 @@
       case persistence
       case folder(id: UUID?)
       case trash
+      case unavailableNoteLink
     }
 
     @Published var workspace = Workspace() {
@@ -555,6 +556,14 @@
 
     func inlineNoteImageImportFailed(_ message: String) {
       saveError = message
+    }
+
+    func reportUnavailableNoteLink() {
+      recordSaveError("Note unavailable", owner: .unavailableNoteLink)
+    }
+
+    var saveErrorIsUnavailableNoteLink: Bool {
+      saveError != nil && canClearSaveError(ownedBy: .unavailableNoteLink)
     }
 
     func folderActionFailed(_ message: String, folderID: UUID?) {
@@ -2496,7 +2505,16 @@
               signpostState
             )
           }
-          let feedbackWriteID = saveFeedback.writeBegan()
+          // The queued write persists its snapshot, but feedback belongs to the
+          // Notes surface that is visible when the write actually begins.
+          let usesDarkSolidNotesChrome = NotesSolidChrome(
+            theme: themeSnapshot, appearance: preferences.chromeAppearance
+          ).isActive
+          let feedbackWriteID = saveFeedback.writeBegan(
+            revealAfter: usesDarkSolidNotesChrome
+              ? SaveFeedbackPresentation.darkSolidNotesRevealDelay
+              : SaveFeedbackPresentation.revealDelay
+          )
           defer { saveFeedback.writeEnded(feedbackWriteID) }
           result = try await saveOperation(
             snapshot.workspace,

@@ -1,4 +1,5 @@
 #if os(macOS)
+  import AppKit
   import Combine
   import Foundation
   import SwiftUI
@@ -144,13 +145,18 @@
     let action: () -> Void
 
     var body: some View {
-      Button(action: action) {
+      let button = Button(action: action) {
         if usesBell {
-          Image(systemName: "bell")
-            .font(.system(size: 16))
+          NotesPaperIcon(glyph: .bell)
             .frame(width: 28, height: 28)
             .overlay(alignment: .topTrailing) {
-              if let statusSymbol = presentation.state.statusSymbol {
+              if presentation.state == .working {
+                Circle()
+                  .fill(Color(nsColor: NSColor(hex: "#E5E9ED")!))
+                  .frame(width: 5, height: 5)
+                  .padding(2)
+                  .accessibilityHidden(true)
+              } else if let statusSymbol = presentation.state.statusSymbol {
                 Image(systemName: statusSymbol)
                   .font(.system(size: 7, weight: .semibold))
                   .foregroundStyle(presentation.state.statusColor(in: theme))
@@ -181,10 +187,17 @@
       }
       .buttonStyle(.plain)
       .fleckHoverFill(in: RoundedRectangle(cornerRadius: 6), isAllowed: usesBell)
+
+      return Group {
+        if usesBell && presentation.state == .idle {
+          button.accessibilityLabel("Activity Inbox")
+        } else {
+          button.accessibilityLabel(presentation.state.accessibilityLabel)
+        }
+      }
       .accessibilityIdentifier("agent-activity-indicator")
-      .accessibilityLabel(presentation.state.accessibilityLabel)
-      .accessibilityHint("Open Agent Activity")
-      .help(presentation.state.accessibilityLabel)
+      .accessibilityHint(usesBell ? "Open Activity Inbox" : "Open Agent Activity")
+      .help(usesBell && presentation.state == .idle ? "Activity Inbox" : presentation.state.accessibilityLabel)
     }
   }
 #endif
