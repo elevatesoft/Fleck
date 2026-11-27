@@ -29,13 +29,18 @@ strip_log="$test_root/strip.log"
 launch_sentinel="$test_root/launched"
 swift_log="$test_root/swift.log"
 source_hash_log="$test_root/source-hashes.log"
+notes_license_names=(Lucide-0.511.0-LICENSE.txt Feather-4.29.2-LICENSE.txt)
 /bin/mkdir -p \
   "$fixture_root/Scripts" \
   "$fixture_root/Sources/FleckApp" \
   "$fixture_root/Assets" \
+  "$fixture_root/docs/licenses" \
   "$fake_bin"
 /bin/cp "$packager" "$fixture_root/Scripts/build-fleck-app.sh"
 /bin/cp "$identity_tool" "$fixture_root/Scripts/fleck-build-identity.py"
+for license in "${notes_license_names[@]}"; do
+  /bin/cp "$repo_root/docs/licenses/$license" "$fixture_root/docs/licenses/$license"
+done
 printf '1.0.3-beta.1\n' > "$fixture_root/VERSION"
 cat > "$fixture_root/CHANGELOG.md" <<'CHANGELOG'
 # Changelog
@@ -294,6 +299,10 @@ packaged_resources="$(/usr/bin/dirname "$packaged")/../Resources"
 for icon_name in FleckAppIcon.icns FleckAppIconDark.icns; do
   /usr/bin/cmp -s "$fixture_root/Assets/$icon_name" "$packaged_resources/$icon_name" \
     || fail "packager did not stage $icon_name"
+done
+for license in "${notes_license_names[@]}"; do
+  /usr/bin/cmp -s "$fixture_root/docs/licenses/$license" "$packaged_resources/$license" \
+    || fail "packager did not stage $license"
 done
 [[ "$(/usr/bin/plutil -extract CFBundleIconFile raw -o - \
   "$(/usr/bin/dirname "$packaged")/../Info.plist")" == 'FleckAppIcon.icns' ]] \
