@@ -4637,6 +4637,7 @@
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.fleckThemeSnapshot) private var theme
+    @Environment(\.font) private var inheritedFont
     @ObservedObject var appState: AppState
     @ObservedObject var commands: EditorCommands
     @ObservedObject var dictationRuntime: DictationRuntime
@@ -5002,7 +5003,7 @@
               .accessibilityHidden(true)
           }
         }
-        .font(solidChrome.isActive ? .system(size: 12) : nil)
+        .font(solidChrome.isActive ? .system(size: 12) : inheritedFont)
         .padding(.horizontal, solidChrome.isActive ? 8 : 0)
         .frame(width: solidChrome.isActive ? 110 : 112, height: solidChrome.isActive ? 28 : nil)
         .background(
@@ -5726,7 +5727,9 @@
         .focusEffectDisabled()
         .multilineTextAlignment(.center)
         .monospacedDigit()
-        .font(solidChrome.isActive ? .system(size: 12, weight: solidChrome.increasedContrast ? .regular : .light) : nil)
+        .font(solidChrome.isActive
+          ? .system(size: 12, weight: solidChrome.increasedContrast ? .regular : .light)
+          : inheritedFont)
         .frame(width: fontSizeFieldWidth, height: solidChrome.isActive ? 28 : nil)
         .background(
           solidChrome.isActive ? solidChrome.toolbarField : .clear,

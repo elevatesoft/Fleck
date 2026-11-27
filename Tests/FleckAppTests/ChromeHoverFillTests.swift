@@ -14,7 +14,8 @@ struct ChromeHoverFillTests {
     #expect(modifier.contains("@Environment(\\.fleckThemeSnapshot) private var theme"))
     #expect(modifier.contains("@State private var isHovered = false"))
     #expect(modifier.contains("if isEnabled, isHovered, isAllowed"))
-    #expect(modifier.contains("theme.increasedContrast ? 0.18 : 0.08"))
+    #expect(modifier.contains("theme.increasedContrast ? 0.18 : opacity ?? 0.08"))
+    #expect(source.contains("in shape: S, isAllowed: Bool = true, opacity: Double? = nil"))
     #expect(modifier.contains(".onHover { isHovered = $0 }"))
     #expect(!modifier.contains(".padding("))
     #expect(!modifier.contains(".frame("))
@@ -49,8 +50,15 @@ struct ChromeHoverFillTests {
   @Test func selectedNoteTabKeepsItsOwnCapsule() throws {
     let source = try notesPanelSource()
 
-    #expect(source.contains("in: Capsule()"))
-    #expect(source.contains("isAllowed: note.id != appState.workspace.selectedNoteID"))
+    #expect(source.contains("in: Capsule().inset(by: -capsuleOutset)"))
+    #expect(source.contains("isAllowed: !solidChrome.isActive && note.id != appState.workspace.selectedNoteID"))
+    let nativeHover = try #require(
+      source.components(separatedBy: "private func syncHoverFrame()").dropFirst().first?
+        .components(separatedBy: "func updateSelection(").first
+    )
+    #expect(nativeHover.contains("noteID != selectedID"))
+    #expect(nativeHover.contains("source.labelCapsuleRect.insetBy(dx: -capsuleOutset, dy: -capsuleOutset)"))
+    #expect(nativeHover.contains("hoverHighlightLayer.isHidden = true"))
   }
 
   private func hoverFillPrecedes(_ anchor: String, in source: String) -> Bool {

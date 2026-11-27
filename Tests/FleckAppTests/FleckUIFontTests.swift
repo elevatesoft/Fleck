@@ -101,7 +101,7 @@
       $0.trimmingCharacters(in: .whitespaces)
     }.joined(separator: "\n")
     #expect(notesWithoutIndentation.contains("Text(\"Could not save: \\(error)\")\n.fleckUIFont(.caption)"))
-    #expect(notes.contains("Text(error)\n                .fleckUIFont(.caption)"))
+    #expect(notesWithoutIndentation.contains("Text(error)\n.fleckUIFont(.caption)"))
     #expect(notes.contains("Text(\"Fleck needs your help\")\n          .fleckUIFont(.headline)"))
     let composerStart = try #require(notes.range(of: "private var folderComposer: some View"))
     let composerEnd = try #require(notes.range(

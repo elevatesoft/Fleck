@@ -123,7 +123,7 @@ func FocusEffectSuppressionKeepsKeyboardFocusAndTheFolderFocusCue() throws {
     to: "private func noteDropDelegate("
   )
   #expect(rowLabel.contains(".fleckNeutralControlOutline("))
-  #expect(rowLabel.contains("isFocused: isFocused && !isSelected"))
+  #expect(rowLabel.contains("isFocused: isFocused && (solidChrome.isActive || !isSelected)"))
 }
 
 @Test

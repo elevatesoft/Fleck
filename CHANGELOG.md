@@ -3,7 +3,7 @@
 All notable Fleck development changes are recorded here. This is development history, not a
 public release log. Packaging unchanged source does not add a changelog entry.
 
-## [1.9.32-beta.1] - 2026-11-27
+## [1.9.34-beta.1] - 2026-11-27
 
 ### Changed
 
@@ -20,6 +20,8 @@ public release log. Packaging unchanged source does not add a changelog entry.
 
 - Preserve the active note when restoring a note from Dark Solid Trash.
 - Close the pinned Dark Solid Notes window with Command-W without trashing the note.
+- Route keyboard shortcuts to the Notes window that owns the key event.
+- Preserve the selected interface font in the standard Notes toolbar.
 - Display decoded note-link labels in backlink excerpts without changing Markdown.
 - Keep hovered note tabs separate from the selection, preserve submenu access
   during diagonal travel, and improve the contrast of the empty Search notes prompt.

@@ -2395,10 +2395,12 @@ private final class EditorChangeRecorder: NSObject, NSTextViewDelegate {
   #expect(!source.contains("Font Size Presets"))
   #expect(fontTrigger.contains("Text(fontFamilyDisplay)"))
   #expect(!fontTrigger.contains("Text(\"Aa\")"))
-  #expect(fontTrigger.contains(".frame(width: 112)"))
+  #expect(fontTrigger.contains(
+    ".frame(width: solidChrome.isActive ? 110 : 112, height: solidChrome.isActive ? 28 : nil)"
+  ))
   #expect(source.contains("MeasuredTrailingToolbarOverflow"))
-  #expect(source.contains("HStack(spacing: 8)"))
-  #expect(source.contains(".padding(.horizontal, 16)"))
+  #expect(source.contains("HStack(spacing: solidChrome.isActive ? 2 : 8)"))
+  #expect(source.contains(".padding(.horizontal, solidChrome.isActive ? 9 : 16)"))
   #expect(!source.contains("FormattingToolbarLayout"))
 }
 
@@ -3929,8 +3931,8 @@ func toolbarFontSizeNativePromptAndEditLifecycle(width: Double) async throws {
   #expect(source.contains("Hide Editor toolbar"))
   #expect(source.contains("Show Editor toolbar"))
   #expect(source.contains("showFormattingBar.toggle()"))
-  #expect(source.contains("if appState.preferences.showFormattingBar"))
-  #expect(source.contains("\"chevron.up\""))
+  #expect(source.contains("let showsFormattingBar = appState.preferences.showFormattingBar"))
+  #expect(source.contains("notesHeaderIcon(systemName: \"chevron.up\", paperGlyph: .chevron)"))
   #expect(source.contains(".rotationEffect("))
   #expect(
     source.contains(
@@ -3946,7 +3948,7 @@ func toolbarFontSizeNativePromptAndEditLifecycle(width: Double) async throws {
   ))
 
   let editorCommands = try #require(source.range(of: "@StateObject private var editorCommands = EditorCommands()"))
-  let formattingBar = try #require(source.range(of: "if appState.preferences.showFormattingBar"))
+  let formattingBar = try #require(source.range(of: "if showsFormattingBar {\n            FormattingBar("))
   #expect(editorCommands.lowerBound < formattingBar.lowerBound)
   #expect(!source.contains(".id(appState.preferences.showFormattingBar)"))
 }
@@ -5516,8 +5518,10 @@ private func withHostedTitleEditors(
   #expect(navigator.contains("moveFocus(direction)"))
   #expect(navigator.contains("isSelected: activeFolderID == nil"))
   #expect(navigator.contains("isSelected: activeFolderID == folder.id"))
-  let rowLabel = try #require(navigator.range(of: "private func rowLabel("))
-  let rowLabelBody = navigator[rowLabel.lowerBound...]
+  let rowLabelBody = try #require(
+    navigator.components(separatedBy: "private func rowLabel(").last?
+      .components(separatedBy: "private func noteDropDelegate(").first
+  )
   let rootRow = try #require(
     navigator.components(separatedBy: "private var rootRow").last?
       .components(separatedBy: "@ViewBuilder\n    private func folderRow").first
@@ -5548,7 +5552,7 @@ private func withHostedTitleEditors(
   #expect(folderFocusable.lowerBound < folderFocused.lowerBound)
   #expect(rowLabelBody.contains("isFocused: Bool"))
   #expect(rowLabelBody.contains(".fleckNeutralControlOutline("))
-  #expect(rowLabelBody.contains("isFocused: isFocused && !isSelected"))
+  #expect(rowLabelBody.contains("isFocused: isFocused && (solidChrome.isActive || !isSelected)"))
   #expect(rowLabelBody.contains("cornerRadius: 6"))
   #expect(
     !rowLabelBody.contains(".focusRing")
@@ -6765,7 +6769,10 @@ private func hostedNavigatorKeyView(
     in: view,
     isUnfiled: identifier == "folder-unfiled"
   )
-  #expect(associatedKeyViews != nil)
+  #expect(
+    associatedKeyViews != nil,
+    "AX owner frame: \(ownerFrame); key candidates: \(keyViews.map { String(describing: $0.convert($0.bounds, to: view)) })"
+  )
   guard let matchingKeyViews = associatedKeyViews else { return nil }
   #expect(!matchingKeyViews.isEmpty)
   guard !matchingKeyViews.isEmpty else { return nil }
@@ -6813,6 +6820,8 @@ private func hostedNavigatorVisualKeyViews(
   let visualRow = visualRows[0]
   let contentHost = visualRow.contentHosts[0]
   let contentFrame = contentHost.convert(contentHost.bounds, to: host)
+  let hasDarkSolidVerticalPixelRounding = ownerFrame.height == 28
+    && visualRow.frame.height == 27 && visualRow.frame.maxY == ownerFrame.maxY
   guard let scroll = owner.enclosingScrollView,
     contentHost.enclosingScrollView === scroll,
     ownerFrame.contains(contentFrame),
@@ -6820,7 +6829,7 @@ private func hostedNavigatorVisualKeyViews(
     ownerFrame.contains(visualRow.frame),
     visualRow.frame.minX == ownerFrame.minX,
     visualRow.frame.maxX == ownerFrame.maxX,
-    visualRow.frame.midY == ownerFrame.midY
+    visualRow.frame.midY == ownerFrame.midY || hasDarkSolidVerticalPixelRounding
   else { return nil }
   return [visualRow.view]
 }

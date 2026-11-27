@@ -57,7 +57,8 @@
       func install(shortcuts: [Shortcut]) {
         self.shortcuts = shortcuts
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-          guard let self else { return event }
+          guard let self, let owner = host?.window, event.window === owner, owner.isKeyWindow
+          else { return event }
           return self.handle(event)
         }
       }

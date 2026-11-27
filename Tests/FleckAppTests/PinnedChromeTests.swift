@@ -92,44 +92,37 @@ import Testing
     let writingSurface = try #require(
       descendants(in: fixture.host, as: AdaptiveOpaqueSurfaceView.self).first
     )
-    let originalTitleFrame = title.convert(title.bounds, to: fixture.host)
+    for (isDark, expectedHex) in [(false, "#FFFFFF"), (true, "#191A1B")] {
+      fixture.state.updatePreferences {
+        $0.theme = isDark ? .dark : .light
+        $0.colorTheme = .monochrome
+        $0.chromeAppearance = .solid
+      }
+      await settle(fixture.host)
+      let theme = fixture.state.themeSnapshot
+      writingSurface.needsDisplay = true
+      writingSurface.displayIfNeeded()
+      let surfaceColor = try #require(writingSurface.layer?.backgroundColor)
+      let originalTitleFrame = title.convert(title.bounds, to: fixture.host)
 
-    #expect(fixture.host.bounds.size == NSSize(width: 640, height: 430))
-    #expect(writingSurface.convert(writingSurface.bounds, to: fixture.host) == fixture.host.bounds)
-    #expect(writingSurface.isOpaque)
-    #expect(writingSurface.layer?.backgroundColor?.alpha == 1)
-    fixture.state.updatePreferences {
-      $0.theme = .light
-      $0.colorTheme = .monochrome
+      #expect(theme.appearance == (isDark ? .dark : .light))
+      #expect(theme.palette[.editorOpaque] == expectedHex)
+      #expect(surfaceColor == theme.nsColor(.editorOpaque).cgColor)
+      #expect(surfaceColor.alpha == 1)
+      #expect(writingSurface.isOpaque)
+      #expect(fixture.host.bounds.size == NSSize(width: 640, height: 430))
+      #expect(writingSurface.convert(writingSurface.bounds, to: fixture.host) == fixture.host.bounds)
+      #expect(originalTitleFrame.minX == (isDark ? 15 : 14))
+      #expect(originalTitleFrame.maxX == 624)
+      #expect(originalTitleFrame.height == 27)
+      #expect(fixture.window.makeFirstResponder(title))
+      await settle(fixture.host)
+      #expect(title.convert(title.bounds, to: fixture.host) == originalTitleFrame)
+      #expect(fixture.window.makeFirstResponder(editor))
+      await settle(fixture.host)
+      #expect(fixture.window.firstResponder === editor)
+      #expect(title.convert(title.bounds, to: fixture.host) == originalTitleFrame)
     }
-    await settle(fixture.host)
-    writingSurface.needsDisplay = true
-    writingSurface.displayIfNeeded()
-    let lightSurfaceColor = try #require(writingSurface.layer?.backgroundColor)
-    let lightTheme = fixture.state.themeSnapshot
-    #expect(lightTheme.appearance == .light)
-    #expect(lightTheme.palette[.editorOpaque] == "#FFFFFF")
-    #expect(lightSurfaceColor == lightTheme.nsColor(.editorOpaque).cgColor)
-
-    fixture.state.updatePreferences { $0.theme = .dark }
-    await settle(fixture.host)
-    writingSurface.needsDisplay = true
-    writingSurface.displayIfNeeded()
-    let darkSurfaceColor = try #require(writingSurface.layer?.backgroundColor)
-    let darkTheme = fixture.state.themeSnapshot
-    #expect(darkTheme.appearance == .dark)
-    #expect(darkTheme.palette[.editorOpaque] == "#191A1B")
-    #expect(darkSurfaceColor == darkTheme.nsColor(.editorOpaque).cgColor)
-    #expect(lightSurfaceColor.alpha == 1)
-    #expect(darkSurfaceColor.alpha == 1)
-    #expect(lightSurfaceColor != darkSurfaceColor)
-    #expect(fixture.window.makeFirstResponder(title))
-    await settle(fixture.host)
-    #expect(title.convert(title.bounds, to: fixture.host) == originalTitleFrame)
-    #expect(fixture.window.makeFirstResponder(editor))
-    await settle(fixture.host)
-    #expect(fixture.window.firstResponder === editor)
-    #expect(title.convert(title.bounds, to: fixture.host) == originalTitleFrame)
   } catch {
     await fixture.close()
     throw error
