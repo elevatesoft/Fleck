@@ -417,6 +417,9 @@ func WorkspaceSearchHostingKeepsCompactSurfaceInsideMinimumWidth() async throws 
   #expect(finished, "Activation restoration stopped retrying before its target mounted")
   #expect(restored)
   #expect(attempts == 13)
+
+  await settleWorkspaceSearchActivationRestore()
+  #expect(attempts == 13)
 }
 
 @Test @MainActor func workspaceSearchStaleAttachmentCannotClearNewPresentation() async throws {

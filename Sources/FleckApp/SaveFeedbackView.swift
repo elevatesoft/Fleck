@@ -1,4 +1,5 @@
 #if os(macOS)
+  import AppKit
   import Combine
   import Foundation
   import SwiftUI
@@ -33,6 +34,7 @@
     typealias RevealScheduler = (Duration, @escaping @MainActor () -> Void) -> Void
 
     static let revealDelay = Duration.milliseconds(800)
+    static let darkSolidNotesRevealDelay = Duration.milliseconds(240)
     static let confirmationIdleDelay = Duration.milliseconds(1500)
     static let confirmationDuration = Duration.seconds(1)
 
@@ -75,12 +77,12 @@
     }
 
     @discardableResult
-    func writeBegan() -> UUID {
+    func writeBegan(revealAfter delay: Duration? = nil) -> UUID {
       let id = UUID()
       activeWrites.insert(id)
       if showsSavedConfirmation { showsSavedConfirmation = false }
       if revealedWrites.isEmpty { state = .pending }
-      scheduleReveal(Self.revealDelay) { [weak self] in
+      scheduleReveal(delay ?? Self.revealDelay) { [weak self] in
         guard let self,
           self.activeWrites.contains(id)
         else { return }
@@ -134,11 +136,18 @@
     @Environment(\.fleckThemeSnapshot) private var theme
     @ObservedObject var presentation: SaveFeedbackPresentation
     let motion: AppMotion
+    var usesDarkSolidNotesChrome = false
 
     var body: some View {
       ZStack(alignment: .trailing) {
         Color.clear
-        if presentation.state == .saving {
+        if usesDarkSolidNotesChrome {
+          if presentation.state == .saving {
+            paperStatus("Saving", saving: true).transition(.opacity)
+          } else if presentation.showsSavedConfirmation {
+            paperStatus("Saved", saving: false).transition(.opacity)
+          }
+        } else if presentation.state == .saving {
           HStack(spacing: 5) {
             ProgressView()
               .controlSize(.mini)
@@ -162,5 +171,37 @@
       .accessibilityValue(presentation.state.accessibilityValue)
       .help(presentation.state.helpText)
     }
+
+    // Paper V1K-0 / VDG-0: both labels anchor to the same slot coordinates.
+    private func paperStatus(_ title: String, saving: Bool) -> some View {
+      let ink = Color(nsColor: NSColor(hex: "#BAC0C4")!)
+      let glyphInk = Color(nsColor: NSColor(hex: "#AEB3B7")!)
+      return HStack(spacing: 6) {
+        Group {
+          if saving {
+            if motion.reduceMotion {
+              Image(systemName: "circle.dotted")
+                .font(.system(size: 11))
+            } else {
+              ProgressView().controlSize(.mini)
+            }
+          } else {
+            Image(systemName: "checkmark")
+              .font(.system(size: 10, weight: .medium))
+          }
+        }
+        .frame(width: 12, height: 12)
+        .foregroundStyle(glyphInk)
+        .accessibilityHidden(true)
+        Text(title)
+          .font(.system(size: 11))
+          .lineLimit(1)
+          .foregroundStyle(ink)
+          .frame(width: 40, height: 16, alignment: .leading)
+      }
+      .padding(.leading, 4)
+      .frame(width: 62, height: 22, alignment: .leading)
+    }
+
   }
 #endif

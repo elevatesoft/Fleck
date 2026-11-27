@@ -73,6 +73,40 @@ import Testing
   #expect((text.textStorage?.attribute(.font, at: 1, effectiveRange: nil) as? NSFont)?.pointSize == 23)
 }
 
+@Test @MainActor func darkSolidFontPickerReselectingCurrentFamilyDoesNotWriteFormatting() throws {
+  _ = NSApplication.shared
+  let note = Note(title: "Title", body: "Body")
+  let window = NSWindow(contentRect: .init(x: -10_000, y: -10_000, width: 280, height: 200),
+    styleMask: .borderless, backing: .buffered, defer: true)
+  let text = NSTextView()
+  text.allowsUndo = true
+  window.contentView = text
+  let font = try #require(NSFont(name: "Times-Bold", size: 28))
+  let original = NSAttributedString(string: note.body, attributes: [.font: font])
+  text.textStorage?.setAttributedString(original)
+  let selection = NSRange(location: 1, length: 2)
+  text.setSelectedRange(selection)
+  let commands = EditorCommands()
+  commands.textView = text
+  let undo = try #require(text.undoManager)
+  undo.removeAllActions()
+
+  let bodyTarget = try #require(FontPickerTarget(
+    note: note, isTitle: false, commands: commands, preservedFamily: "Times"
+  ))
+  #expect(bodyTarget.apply("Times", note: note, isEditorVisible: true, commands: commands,
+    titleMutation: { _ in Issue.record("Body routed to title") }))
+  #expect(text.textStorage == original)
+  #expect(text.selectedRange() == selection)
+  #expect(!undo.canUndo)
+
+  let titleTarget = try #require(FontPickerTarget(
+    note: note, isTitle: true, commands: commands, preservedFamily: "Times"
+  ))
+  #expect(titleTarget.apply("Times", note: note, isEditorVisible: true, commands: commands,
+    titleMutation: { _ in Issue.record("Reselecting the inherited font set a title override") }))
+}
+
 @Test @MainActor func fontPickerHostedVisualSamples() throws {
   let evidence = try fontPickerEvidenceDirectory()
   for appearance in [NSAppearance.Name.aqua, .darkAqua] {

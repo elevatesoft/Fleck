@@ -74,7 +74,9 @@ import Testing
   #expect(!titleArea.contains(".accessibilityLabel(\"Fleck\")"))
   #expect(activityIndicator.contains("Button(action: action)"))
   #expect(activityIndicator.contains(".accessibilityLabel(presentation.state.accessibilityLabel)"))
-  #expect(activityIndicator.contains(".accessibilityHint(\"Open Agent Activity\")"))
+  #expect(activityIndicator.contains(
+    ".accessibilityHint(usesBell ? \"Open Activity Inbox\" : \"Open Agent Activity\")"
+  ))
 }
 
 @Test @MainActor func fleckMarkFailsLoudlyForMissingPackagedResourceButFallsBackInBareDevelopment() {

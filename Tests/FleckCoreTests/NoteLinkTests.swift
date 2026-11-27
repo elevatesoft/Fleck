@@ -120,3 +120,16 @@ import Testing
   #expect(!excerpt.contains("\n"))
   #expect(excerpt.count <= 26)
 }
+
+@Test func NoteLinkParserExcerptUsesDecodedLabelsBeforeTruncation() throws {
+  let id = UUID()
+  let first = NoteLinkFormatter.markdown(label: "🎯 ] \\ Plan", targetNoteID: id)
+  let second = NoteLinkFormatter.markdown(label: "details", targetNoteID: id)
+  let body = "See \(first) and\n\(second)."
+  let links = NoteLinkParser.links(in: body)
+  let link = try #require(links.first)
+  #expect(NoteLinkParser.excerpt(around: link.range, in: body, limit: 26) == "See 🎯 ] \\ Plan and details…")
+  #expect(NoteLinkParser.excerpt(around: link.range, in: body, limit: 27) == "See 🎯 ] \\ Plan and details.")
+  #expect(links.map(\.targetNoteID) == [id, id])
+  #expect((body as NSString).substring(with: link.range) == first)
+}

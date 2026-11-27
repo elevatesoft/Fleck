@@ -151,7 +151,10 @@ import Testing
   #expect(!formattingBar.contains(".background(.bar)"))
   #expect(normalizedFormattingBar.contains(
     "frame(maxWidth: .infinity) .modifier(FormattingBarSurface(isPinned: isPinned)) "
-      + ".padding(.horizontal, 10) .padding(.top, 8)"
+      + ".padding(solidChrome.isActive "
+      + "? solidChrome.windowEdgePadding(horizontal: 11, after: windowReserve) "
+      + ": EdgeInsets(top: 0, leading: 10, bottom: 0, trailing: 10)) "
+      + ".padding(.top, solidChrome.isActive ? 6 : 8)"
   ))
   #expect(surface.contains("@Environment(\\.fleckThemeSnapshot) private var theme"))
   #expect(surface.contains("FleckChromeMaterialPolicy.current("))

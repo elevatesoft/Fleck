@@ -8,6 +8,8 @@ readonly info_plist="$repo_root/Sources/FleckApp/Info.plist"
 readonly canonical_mark="$repo_root/Assets/fleck-mark.png"
 readonly canonical_app_icon="$repo_root/Assets/FleckAppIcon.icns"
 readonly canonical_dark_app_icon="$repo_root/Assets/FleckAppIconDark.icns"
+readonly notes_glyph_license="$repo_root/docs/licenses/Lucide-0.511.0-LICENSE.txt"
+readonly notes_glyph_feather_license="$repo_root/docs/licenses/Feather-4.29.2-LICENSE.txt"
 readonly identity_tool="$script_dir/fleck-build-identity.py"
 readonly inputs_tool="$script_dir/fleck-build-inputs.py"
 readonly publish_tool="$script_dir/fleck-publish.py"
@@ -224,7 +226,9 @@ for required_file in \
   "$info_plist" \
   "$canonical_mark" \
   "$canonical_app_icon" \
-  "$canonical_dark_app_icon"; do
+  "$canonical_dark_app_icon" \
+  "$notes_glyph_license" \
+  "$notes_glyph_feather_license"; do
   if [[ ! -f "$required_file" ]]; then
     printf 'error: required release input not found: %s\n' "$required_file" >&2
     exit 2
@@ -244,6 +248,8 @@ readonly staged_app="$staging_root/Fleck.app"
 /bin/cp "$canonical_mark" "$staged_app/Contents/Resources/fleck-mark.png"
 /bin/cp "$canonical_app_icon" "$staged_app/Contents/Resources/FleckAppIcon.icns"
 /bin/cp "$canonical_dark_app_icon" "$staged_app/Contents/Resources/FleckAppIconDark.icns"
+/bin/cp "$notes_glyph_license" "$staged_app/Contents/Resources/Lucide-0.511.0-LICENSE.txt"
+/bin/cp "$notes_glyph_feather_license" "$staged_app/Contents/Resources/Feather-4.29.2-LICENSE.txt"
 /usr/bin/plutil -insert FleckDevelopmentAccess -bool true "$staged_app/Contents/Info.plist"
 if [[ -n "$prebuilt_inputs" ]]; then
   /bin/cp "$staged_receipt" "$staged_app/Contents/Resources/FleckBuildInputs.json"

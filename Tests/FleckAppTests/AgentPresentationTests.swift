@@ -737,36 +737,27 @@ struct AgentPresentationTests {
     #expect(permissionControl.label(forSegment: 2) == "Read & Write")
   }
 
-  @Test @MainActor
-  func noteAgentAccessPermissionChoicesStayInline() async throws {
-    let root = FileManager.default.temporaryDirectory
-      .appendingPathComponent("NoteAgentAccessPresentation-\(UUID().uuidString)", isDirectory: true)
-    defer { try? FileManager.default.removeItem(at: root) }
-    let note = Note(title: "Launch")
-    let profile = profile(name: "Codex", revokedAt: nil)
-    let state = try await makeAgentAccessState(
-      root: root,
-      note: note,
-      profile: profile
-    )
-    let (window, host) = await hostedWindow(
-      rootView: AgentNoteAccessEditorView(note: note)
-        .environmentObject(state),
-      size: NSSize(width: 520, height: 600)
-    )
-    defer { window.orderOut(nil) }
-
-    let permissionControl = try #require(
-      hostedDescendant(in: host, as: NSSegmentedControl.self)
-    )
-    #expect(permissionControl.segmentCount == 3)
-    #expect(permissionControl.label(forSegment: 0) == "Off")
-    #expect(permissionControl.label(forSegment: 1) == "Read")
-    #expect(permissionControl.label(forSegment: 2) == "Read & Write")
-  }
-
   @Test func clearingActivityRequiresConfirmation() {
     #expect(AgentActivityClearPresentation.requiresConfirmation)
+  }
+
+  @Test func activityNoteFilterUsesLiveNoteIDsAndDistinguishesNoMatches() {
+    let test = Note(title: "Test")
+    let another = Note(title: "Test")
+    let noChanges = Note(title: "No changes")
+    let notes = [test, another, noChanges]
+    let records = [makeRecord(note: test), makeRecord(note: another)]
+
+    #expect(AgentActivityNoteFilter(notes: notes, selectedNoteID: nil).records(from: records)
+      == records)
+    #expect(AgentActivityNoteFilter(notes: notes, selectedNoteID: test.id).records(from: records)
+      == [records[0]])
+    let empty = AgentActivityNoteFilter(notes: notes, selectedNoteID: noChanges.id)
+    #expect(empty.selectedNote == noChanges)
+    #expect(empty.records(from: records).isEmpty)
+    let deleted = AgentActivityNoteFilter(notes: [another, noChanges], selectedNoteID: test.id)
+    #expect(deleted.selectedNote == nil)
+    #expect(deleted.records(from: records) == records)
   }
 
   @Test @MainActor
@@ -832,6 +823,182 @@ struct AgentPresentationTests {
     #expect(presentation.dismissalCount == 1)
     #expect(state.agentActivity.count == initialActivityCount)
     #expect(state.workspace == initialWorkspace)
+  }
+
+  @Test @MainActor
+  func darkSolidNotesInboxOpensExactRecordAndRoutesToHistoryClear() async throws {
+    let previousAXEnhancedUserInterface = enableAgentPresentationAccessibility()
+    defer { restoreAgentPresentationAccessibility(previousAXEnhancedUserInterface) }
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent("DarkSolidNotesActivity-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let folder = try Folder(name: "Replay")
+    let startingNote = Note(title: "Starting note")
+    let changedNote = Note(title: "Test", body: "Review recorded", revision: 1, folderID: folder.id)
+    var preferences = AppPreferences()
+    preferences.theme = .dark
+    preferences.colorTheme = .monochrome
+    preferences.chromeAppearance = .solid
+    let store = LocalStore(rootURL: root)
+    try await store.save(
+      workspace: Workspace(
+        notes: [startingNote, changedNote], selectedNoteID: startingNote.id, folders: [folder]
+      ),
+      preferences: preferences,
+      trashedNotes: []
+    )
+    let activityStore = AgentActivityStore(rootURL: root)
+    let before = "Review pending"
+    let actor = AgentActivityActor.integration(
+      profileID: UUID(), displayName: "Synthetic integration"
+    )
+    let transactions = try [Date(), Date().addingTimeInterval(-60)].map { date in
+      let transaction = PreparedAgentTransaction(
+        changeID: UUID(),
+        noteID: changedNote.id,
+        noteTitle: changedNote.title,
+        actor: actor,
+        operationID: UUID(),
+        createdAt: date,
+        operation: .replaceLines,
+        patch: AgentTextPatch(
+          beforeText: before, afterText: changedNote.body,
+          range: NSRange(location: 0, length: before.utf16.count),
+          prefixContext: "", suffixContext: ""
+        ),
+        previousRevision: 0,
+        resultingRevision: 1,
+        resultingBodySHA256: ""
+      )
+      try activityStore.prepare(transaction)
+      try activityStore.commit(
+        changeID: transaction.changeID,
+        receipt: AgentWriteReceipt(
+          changeID: transaction.changeID, noteID: changedNote.id,
+          previousRevision: 0, resultingRevision: 1
+        )
+      )
+      return transaction
+    }
+    let transaction = try #require(transactions.first)
+    let unopened = try #require(transactions.last)
+    let state = AppState(store: store, agentActivityStore: activityStore)
+    await state.waitUntilInitialLoad()
+    let runtime = DictationRuntime(appState: state, applicationSupportURL: root)
+    let (window, host) = await hostedWindow(
+      rootView: NotesPanel(dictationRuntime: runtime, sizing: .container)
+        .environmentObject(state)
+        .fleckTheme(state),
+      size: NSSize(width: 686, height: 436)
+    )
+    defer {
+      window.contentView = nil
+      window.orderOut(nil)
+    }
+
+    func openInbox() async throws -> NSWindow {
+      let previouslyVisible = Set(NSApp.windows.filter(\.isVisible).map(ObjectIdentifier.init))
+      let bell = try #require(
+        agentActivityAccessibilityElement(host, identifier: "agent-activity-indicator")
+      )
+      try clickAgentActivityElement(bell, in: window)
+      for _ in 0..<80 {
+        let candidates = [window] + NSApp.windows.filter {
+          $0.isVisible && !previouslyVisible.contains(ObjectIdentifier($0))
+        }
+        if let opened = candidates.first(where: {
+          agentActivityAccessibilityElement($0.contentView, identifier: "notes-activity-inbox")
+            != nil
+        }) {
+          return opened
+        }
+        try await Task.sleep(for: .milliseconds(25))
+      }
+      Issue.record("Notes bell did not present an Activity Inbox")
+      throw CocoaError(.featureUnsupported)
+    }
+
+    func click(_ label: String) async throws {
+      let control = try #require(agentActivityAccessibilityElement(host, label: label))
+      try clickAgentActivityElement(control, in: window)
+      await settleAgentActivityHost(host)
+    }
+
+    var inbox = try await openInbox()
+    #expect(activityStore.inboxReadIDs().isEmpty)
+    #expect(agentActivityAccessibilityElement(host, label: "Close Agent Activity") == nil)
+    let inboxRow = try #require(agentActivityAccessibilityElement(
+      inbox.contentView, identifier: "notes-activity-inbox-row-\(transaction.changeID.uuidString)"
+    ))
+    #expect(inboxRow.value(forKey: "accessibilityValue") as? String == "Unread")
+    _ = inboxRow.perform(NSSelectorFromString("accessibilityPerformPress"))
+    let inboxContent = try #require(inbox.contentView)
+    await settleAgentActivityHost(inboxContent)
+    #expect(agentActivityAccessibilityElement(inboxContent, label: "Copy Details") != nil)
+    #expect(AgentActivityStore(rootURL: root).inboxReadIDs() == [transaction.changeID])
+    let back = try #require(agentActivityAccessibilityElement(inboxContent, label: "Back"))
+    _ = back.perform(NSSelectorFromString("accessibilityPerformPress"))
+    await settleAgentActivityHost(inboxContent)
+    let readRow = try #require(agentActivityAccessibilityElement(
+      inboxContent, identifier: "notes-activity-inbox-row-\(transaction.changeID.uuidString)"
+    ))
+    let unreadRow = try #require(agentActivityAccessibilityElement(
+      inboxContent, identifier: "notes-activity-inbox-row-\(unopened.changeID.uuidString)"
+    ))
+    #expect(readRow.value(forKey: "accessibilityValue") as? String == "Read")
+    #expect(unreadRow.value(forKey: "accessibilityValue") as? String == "Unread")
+    #expect(agentActivityAccessibilityElement(inboxContent, label: "Close Activity Inbox") == nil)
+    inbox.cancelOperation(nil)
+    await settleAgentActivityHost(host)
+    #expect(!inbox.isVisible)
+
+    func openHistoryFromInbox() async throws {
+      inbox = try await openInbox()
+      let history = try #require(agentActivityAccessibilityElement(
+        inbox.contentView, label: "Open Agent Activity"
+      ))
+      _ = history.perform(NSSelectorFromString("accessibilityPerformPress"))
+      await settleAgentActivityHost(host)
+      #expect(window.sheets.isEmpty)
+      #expect(agentActivityAccessibilityElement(host, label: "Close Agent Activity") != nil)
+    }
+
+    try await openHistoryFromInbox()
+    #expect(state.agentActivity.map(\.changeID) == transactions.map(\.changeID))
+    #expect(agentActivityAccessibilityElement(host, identifier: "notes-agent-activity-note-filter")
+      != nil)
+    #expect(agentActivityAccessibilityElement(host, label: "Copy Details") != nil)
+    try await click("Open Note")
+    #expect(state.workspace.selectedNoteID == changedNote.id)
+    #expect(agentActivityAccessibilityElement(host, label: "Close Agent Activity") == nil)
+
+    try await openHistoryFromInbox()
+    try await click("Clear Activity")
+    let confirmation = "notes-agent-activity-clear-confirmation"
+    #expect(agentActivityAccessibilityElement(host, identifier: confirmation) != nil)
+    #expect(agentActivityAccessibilityElement(host, label: "Close Agent Activity") == nil)
+    #expect(activityStore.record(id: transaction.changeID) != nil)
+
+    sendEscape(to: window)
+    await settleAgentActivityHost(host)
+    #expect(agentActivityAccessibilityElement(host, identifier: confirmation) == nil)
+    #expect(agentActivityAccessibilityElement(host, label: "Close Agent Activity") != nil)
+    #expect(activityStore.record(id: transaction.changeID) != nil)
+
+    try await click("Clear Activity")
+    try await click("Clear Activity")
+    #expect(state.agentActivity.isEmpty)
+    #expect(activityStore.inboxReadIDs().isEmpty)
+    for entry in transactions {
+      #expect(activityStore.record(id: entry.changeID) == nil)
+      #expect(activityStore.priorReceipt(actor: actor, operationID: entry.operationID)?.changeID
+        == entry.changeID)
+    }
+    #expect(state.selectedNote?.body == changedNote.body)
+    try await click("Close Agent Activity")
+    #expect(agentActivityAccessibilityElement(host, label: "Close Agent Activity") == nil)
+    #expect(window.isVisible)
+    await runtime.shutdown()
   }
 
   @Test @MainActor
@@ -972,42 +1139,6 @@ struct AgentPresentationTests {
       lastConnectedAt: nil,
       revokedAt: revokedAt
     )
-  }
-
-  @MainActor
-  private func makeAgentAccessState(
-    root: URL,
-    note: Note,
-    profile: AgentIntegrationProfile
-  ) async throws -> AppState {
-    let store = LocalStore(rootURL: root)
-    try await store.save(
-      workspace: Workspace(notes: [note], selectedNoteID: note.id),
-      preferences: .init(),
-      trashedNotes: []
-    )
-    let profilesURL = root
-      .appendingPathComponent("AgentIntegrations", isDirectory: true)
-      .appendingPathComponent("profiles.json")
-    try FileManager.default.createDirectory(
-      at: profilesURL.deletingLastPathComponent(),
-      withIntermediateDirectories: true
-    )
-    try JSONEncoder().encode([profile]).write(to: profilesURL)
-    let capabilityStore = AgentCapabilityStore(
-      capabilitiesURL: profilesURL.deletingLastPathComponent()
-        .appendingPathComponent("capabilities.json"),
-      previousCapabilitiesURL: profilesURL.deletingLastPathComponent()
-        .appendingPathComponent("capabilities.previous.json")
-    )
-    let state = AppState(
-      store: store,
-      saveOperation: { _, _, _, _ in .committed },
-      agentProfileStore: AgentProfileStore(profilesURL: profilesURL),
-      agentCapabilityStore: capabilityStore
-    )
-    await state.waitUntilInitialLoad()
-    return state
   }
 
   @MainActor

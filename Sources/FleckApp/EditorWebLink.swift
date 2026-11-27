@@ -316,23 +316,26 @@
   struct EditorWebLinkPopover: View {
     @Environment(\.fleckThemeSnapshot) private var theme
     let target: EditorWebLinkTarget
+    let notesChrome: NotesSolidChrome
     let onApply: (String, String?) -> Bool
     let onRemove: () -> Bool
     let onCancel: () -> Void
     @State private var urlText: String
     @State private var displayText: String
     @State private var validationMessage: String?
-    @FocusState private var focusedField: Field?
+    @FocusState private var focus: Focus?
 
-    private enum Field { case url, display }
+    private enum Focus { case url, display, remove, cancel, apply }
 
     init(
       target: EditorWebLinkTarget,
+      notesChrome: NotesSolidChrome,
       onApply: @escaping (String, String?) -> Bool,
       onRemove: @escaping () -> Bool,
       onCancel: @escaping () -> Void
     ) {
       self.target = target
+      self.notesChrome = notesChrome
       self.onApply = onApply
       self.onRemove = onRemove
       self.onCancel = onCancel
@@ -343,30 +346,28 @@
     var body: some View {
       VStack(alignment: .leading, spacing: 10) {
         Text(target.isEditingExistingLink ? "Edit Web Link" : "Add Web Link")
-          .font(.headline)
-        TextField("URL", text: $urlText)
-          .focused($focusedField, equals: .url)
-          .accessibilityLabel("Web link URL")
+          .font(notesChrome.isActive ? .system(size: 13, weight: .semibold) : .headline)
+          .frame(minHeight: notesChrome.isActive ? 20 : nil, alignment: .topLeading)
+        field("URL", value: $urlText, accessibilityLabel: "Web link URL", focus: .url)
         if !target.isEditingExistingLink {
-          TextField("Display text (optional)", text: $displayText)
-            .focused($focusedField, equals: .display)
-            .accessibilityLabel("Web link display text")
+          field("Display text (optional)", value: $displayText, accessibilityLabel: "Web link display text", focus: .display)
         }
         if let validationMessage {
           Text(validationMessage)
-            .font(.caption)
+            .font(notesChrome.isActive ? .system(size: 11) : .caption)
             .foregroundStyle(theme.color(.error))
+            .frame(minHeight: notesChrome.isActive ? 26 : nil, alignment: .topLeading)
             .accessibilityLabel("Web link error: \(validationMessage)")
         }
-        HStack {
+        HStack(spacing: notesChrome.isActive ? 8 : nil) {
           if target.isEditingExistingLink {
-            Button("Remove", role: .destructive) {
+            action("Remove", for: .remove, role: .destructive) {
               if onRemove() { onCancel() }
             }
           }
           Spacer()
-          Button("Cancel", action: onCancel)
-          Button("Apply") {
+          action("Cancel", for: .cancel, perform: onCancel)
+          action("Apply", for: .apply) {
             guard EditorWebLink.validatedURL(urlText) != nil else {
               validationMessage = "Enter an absolute http or https URL with a host."
               return
@@ -379,10 +380,64 @@
           }
           .keyboardShortcut(.defaultAction)
         }
+        .padding(.top, notesChrome.isActive ? 16 : 0)
       }
       .frame(width: 320)
       .padding(12)
-      .onAppear { focusedField = .url }
+      .background {
+        if notesChrome.isActive {
+          let shape = RoundedRectangle(cornerRadius: 10)
+          shape.fill(notesChrome.webLinkSurface)
+            .overlay { shape.strokeBorder(notesChrome.webLinkFieldOutline, lineWidth: 1) }
+            .allowsHitTesting(false)
+        }
+      }
+      .onAppear { focus = .url }
+    }
+
+    @ViewBuilder
+    private func field(
+      _ title: LocalizedStringKey, value: Binding<String>, accessibilityLabel: LocalizedStringKey, focus target: Focus
+    ) -> some View {
+      let input = TextField(title, text: value)
+        .focused($focus, equals: target)
+        .accessibilityLabel(accessibilityLabel)
+      if notesChrome.isActive {
+        let shape = RoundedRectangle(cornerRadius: 5)
+        input
+          .textFieldStyle(.plain)
+          .focusEffectDisabled()
+          .font(.system(size: 13))
+          .padding(.horizontal, 8)
+          .frame(minHeight: 26)
+          .background(notesChrome.webLinkField, in: shape)
+          .overlay {
+            shape.strokeBorder(focus == target ? notesChrome.webLinkFocusOutline : notesChrome.webLinkFieldOutline, lineWidth: 1)
+              .allowsHitTesting(false)
+          }
+      } else {
+        input
+      }
+    }
+
+    @ViewBuilder
+    private func action(
+      _ title: LocalizedStringKey, for target: Focus, role: ButtonRole? = nil, perform: @escaping () -> Void
+    ) -> some View {
+      let button = Button(title, role: role, action: perform)
+      if notesChrome.isActive {
+        button
+          .buttonStyle(NotesSolidActionStyle(
+            width: target == .remove ? 0 : 67, height: 26,
+            ink: theme.color(target == .apply ? .accentText : target == .remove ? .error : .textPrimary),
+            surface: target == .apply ? theme.color(.accent) : target == .cancel ? notesChrome.webLinkButton : .clear,
+            outline: target == .cancel ? notesChrome.webLinkFieldOutline : .clear
+          ))
+          .focused($focus, equals: target)
+          .fleckNeutralControlOutline(isFocused: focus == target, cornerRadius: 6)
+      } else {
+        button
+      }
     }
   }
 #endif

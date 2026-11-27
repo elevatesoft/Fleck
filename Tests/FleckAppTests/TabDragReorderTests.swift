@@ -304,7 +304,8 @@ private func nativeTabDragMaximumPixelComponentDelta(from source: NSImage, to re
   #expect(tabStrip.contains("tabStripContentWidth = width"))
   #expect(tabStrip.contains("if hasOverflow"))
   #expect(tabStrip.contains(".frame(width: tabViewportWidth, alignment: .leading)"))
-  #expect(tabStrip.contains(".frame(height: 37)"))
+  #expect(tabStrip.contains("let stripHeight: CGFloat = solidChrome.isActive ? 39 : 37"))
+  #expect(tabStrip.contains(".frame(height: stripHeight)"))
   #expect(scrollViewport.contains("HStack(spacing: 6) {"))
   #expect(scrollViewport.contains(".id(TabScrollTarget.leading)"))
   #expect(scrollViewport.contains(".id(TabScrollTarget.trailing)"))
@@ -335,7 +336,7 @@ private func nativeTabDragMaximumPixelComponentDelta(from source: NSImage, to re
   #expect(tabStrip.contains(".help(\"Show earlier tabs\")"))
   #expect(tabStrip.contains(".help(\"Show later tabs\")"))
   #expect(tabStrip.contains("width: TabOverflowPresentation.tabOverflowRailWidth,"))
-  #expect(tabStrip.components(separatedBy: ".frame(width: 28, height: 37)").count - 1 == 2)
+  #expect(tabStrip.components(separatedBy: ".frame(width: 28, height: stripHeight)").count - 1 == 2)
   #expect(tabStrip.components(separatedBy: ".contentShape(Rectangle())").count - 1 == 2)
   #expect(!tabStrip.contains("accessibilityHidden(!hasHidden"))
   #expect(!tabStrip.contains(".opacity(hasHidden"))
@@ -348,7 +349,7 @@ private func nativeTabDragMaximumPixelComponentDelta(from source: NSImage, to re
       .components(separatedBy: "private var motion").first
   )
 
-  #expect(tabStrip.contains(".frame(height: 37, alignment: .center)"))
+  #expect(tabStrip.contains(".frame(height: stripHeight, alignment: solidChrome.isActive ? .top : .center)"))
   #expect(!tabStrip.contains(".padding(.bottom, 9)"))
   #expect(!source.contains("@State private var tabContentLeadingEdge"))
   #expect(!source.contains("@State private var tabContentTrailingEdge"))
@@ -1790,13 +1791,18 @@ func hostedUnselectedTabBuildsVisibleDragItemBeforeNativeWillBegin() async throw
   )
   window.isReleasedWhenClosed = false
   window.contentView = host
+  NSApp.activate()
   window.makeKeyAndOrderFront(nil)
-  await settleTabStripHost(host)
   defer {
     window.contentView = nil
     window.orderOut(nil)
     window.close()
   }
+  for _ in 0..<60 where !NSApp.isActive || !window.isKeyWindow {
+    try await Task.sleep(for: .milliseconds(20))
+  }
+  try #require(NSApp.isActive && window.isKeyWindow)
+  await settleTabStripHost(host)
 
   var endOperations: [NSDragOperation] = []
   var completedCaptures = 0
@@ -1812,13 +1818,29 @@ func hostedUnselectedTabBuildsVisibleDragItemBeforeNativeWillBegin() async throw
     state.updatePreferences { $0.theme = captureCase.dark ? .dark : .light }
     window.appearance = NSAppearance(named: captureCase.appearance)
     await settleTabStripHost(host)
-    let destination = try #require(findDestination(host))
-    let source = try #require(findSource(captureCase.noteID, in: destination))
+    let laidOutDestination = try #require(findDestination(host))
+    let laidOutSource = try #require(findSource(captureCase.noteID, in: laidOutDestination))
+    let start = laidOutSource.convert(
+      NSPoint(x: laidOutSource.bounds.midX, y: laidOutSource.bounds.midY), to: nil
+    )
+    let parent = try #require(host.superview)
+    let hit = host.hitTest(parent.convert(start, from: nil))
+    let hitSource = sequence(first: hit, next: { $0?.superview })
+      .compactMap { $0 as? ReorderSourceHostingView }.first
+    let source = try #require(hitSource)
+    try #require(source.noteID == captureCase.noteID)
+    let hitDestination = sequence(first: source.superview, next: { $0?.superview })
+      .compactMap { $0 as? FluidTabDestinationView }.first
+    let destination = try #require(hitDestination)
+    let sourceCenter = NSPoint(x: source.bounds.midX, y: source.bounds.midY)
+    #expect(source.convert(sourceCenter, to: nil) == start)
     let preEventSource = try renderedImage(of: source)
     #expect(visiblePixels(in: preEventSource) > 0)
     let originalBegin = try #require(source.onNativeBegin)
+    var pasteboardWriterCreated = false
     source.onNativeBegin = {
       let (provider, pasteboardWriter, end) = originalBegin()
+      pasteboardWriterCreated = pasteboardWriter != nil
       return (provider, pasteboardWriter, { operation in
         endOperations.append(operation)
         end(operation)
@@ -1837,10 +1859,6 @@ func hostedUnselectedTabBuildsVisibleDragItemBeforeNativeWillBegin() async throw
       }
       return true
     }
-    let sourceFrame = destination.convert(source.bounds, from: source)
-    let start = destination.convert(
-      NSPoint(x: sourceFrame.midX, y: sourceFrame.midY), to: nil
-    )
     let ambientAppearance = try #require(NSAppearance(named: captureCase.ambient))
     ambientAppearance.performAsCurrentDrawingAppearance {
       for (sequence, event) in [
@@ -1864,7 +1882,10 @@ func hostedUnselectedTabBuildsVisibleDragItemBeforeNativeWillBegin() async throw
     }
     await settleTabStripHost(host)
 
-    let item = try #require(draggingItems.first)
+    let item = try #require(
+      draggingItems.first,
+      "appearance=\(captureCase.appearance.rawValue) selected=\(captureCase.selected) key=\(window.isKeyWindow) active=\(NSApp.isActive) writer=\(pasteboardWriterCreated) start=\(start)"
+    )
     let preview = try #require(capturedSource?.preview)
     let previewImage = preview.image
     let renderedSource = try #require(sourceImageAtDrag)
@@ -1885,8 +1906,9 @@ func hostedUnselectedTabBuildsVisibleDragItemBeforeNativeWillBegin() async throw
     #expect(visiblePixels(in: previewImage) > 0)
     if captureCase.selected {
       let capsuleRect = source.labelCapsuleRect
-      #expect(capsuleRect.minY == 4.5)
+      #expect(capsuleRect.minY == (captureCase.dark ? 5 : 4.5))
       #expect(capsuleRect.height == 28)
+      #expect(capsuleRect.midY == source.bounds.midY)
       #expect(nativeTabDragMaximumPixelComponentDelta(
         from: renderedSource, to: previewImage, outside: capsuleRect.insetBy(dx: -1, dy: -1)
       ) < 0.02)

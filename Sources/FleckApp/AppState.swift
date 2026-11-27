@@ -70,6 +70,8 @@
     private enum SaveErrorOwner: Equatable {
       case persistence
       case folder(id: UUID?)
+      case trash
+      case unavailableNoteLink
     }
 
     @Published var workspace = Workspace() {
@@ -556,6 +558,14 @@
       saveError = message
     }
 
+    func reportUnavailableNoteLink() {
+      recordSaveError("Note unavailable", owner: .unavailableNoteLink)
+    }
+
+    var saveErrorIsUnavailableNoteLink: Bool {
+      saveError != nil && canClearSaveError(ownedBy: .unavailableNoteLink)
+    }
+
     func folderActionFailed(_ message: String, folderID: UUID?) {
       recordSaveError(message, owner: .folder(id: folderID))
     }
@@ -575,6 +585,15 @@
     private func canClearSaveError(ownedBy owner: SaveErrorOwner) -> Bool {
       saveError == nil
         || (saveErrorOwner == owner && saveErrorOwnerGeneration == saveErrorGeneration)
+    }
+
+    var trashUpdateError: String? {
+      canClearSaveError(ownedBy: .trash) ? saveError : nil
+    }
+
+    private func recordTrashUpdateError(_ message: String?) {
+      guard message != nil || trashUpdateError != nil else { return }
+      recordSaveError(message, owner: .trash)
     }
 
     var canRetryPersistenceSave: Bool {
@@ -2229,14 +2248,14 @@
     func refreshTrash() async {
       do {
         trashedNotes = try await store.loadTrash()
-        saveError = nil
+        recordTrashUpdateError(nil)
       } catch {
-        saveError = error.localizedDescription
+        recordTrashUpdateError(error.localizedDescription)
       }
     }
 
     @discardableResult
-    func restore(_ trashedNote: TrashedNote) -> Task<Void, Never>? {
+    func restore(_ trashedNote: TrashedNote, selectsRestoredNote: Bool = true) -> Task<Void, Never>? {
       guard !isLockedNote(trashedNote.id) else { return nil }
       guard startupMigrationError == nil else { return nil }
       guard pendingRestoreNoteIDs.insert(trashedNote.id).inserted else {
@@ -2250,7 +2269,7 @@
       trashedNotes.removeAll { $0.id == trashedNote.id }
       let originalNote = workspace.notes.first(where: { $0.id == trashedNote.id })
       let originalSelectedNoteID = workspace.selectedNoteID
-      workspace.addRestoredNote(trashedNote.note)
+      workspace.addRestoredNote(trashedNote.note, selectsRestoredNote: selectsRestoredNote)
       let restoreOperation = self.restoreOperation
       let loadTrashOperation = self.loadTrashOperation
       return Task { @MainActor in
@@ -2275,17 +2294,17 @@
 
           do {
             trashedNotes = try await loadTrashOperation()
-            saveError = restoreOutcome.trashCleanup == .failed
+            recordTrashUpdateError(restoreOutcome.trashCleanup == .failed
               ? Self.restoreTrashCleanupFailureMessage
-              : nil
+              : nil)
           } catch {
             if restoreOutcome.trashCleanup == .failed {
               if !trashedNotes.contains(where: { $0.id == trashedNote.id }) {
                 trashedNotes.append(trashedNote)
               }
-              saveError = Self.restoreTrashCleanupFailureMessage
+              recordTrashUpdateError(Self.restoreTrashCleanupFailureMessage)
             } else {
-              saveError = error.localizedDescription
+              recordTrashUpdateError(error.localizedDescription)
             }
           }
           return
@@ -2310,7 +2329,7 @@
               trashedNotes.append(trashedNote)
             }
           }
-          saveError = restoreError.localizedDescription
+          recordTrashUpdateError(restoreError.localizedDescription)
           return
         }
       }
@@ -2486,7 +2505,16 @@
               signpostState
             )
           }
-          let feedbackWriteID = saveFeedback.writeBegan()
+          // The queued write persists its snapshot, but feedback belongs to the
+          // Notes surface that is visible when the write actually begins.
+          let usesDarkSolidNotesChrome = NotesSolidChrome(
+            theme: themeSnapshot, appearance: preferences.chromeAppearance
+          ).isActive
+          let feedbackWriteID = saveFeedback.writeBegan(
+            revealAfter: usesDarkSolidNotesChrome
+              ? SaveFeedbackPresentation.darkSolidNotesRevealDelay
+              : SaveFeedbackPresentation.revealDelay
+          )
           defer { saveFeedback.writeEnded(feedbackWriteID) }
           result = try await saveOperation(
             snapshot.workspace,

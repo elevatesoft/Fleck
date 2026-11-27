@@ -53,19 +53,11 @@
 
   enum AgentCapabilityPresentation {
     static let noToolsOrNotesGranted = "No tools or notes granted"
-    static let manageAgentAccessTitle = "Manage Agent Access…"
-    static let manageAgentAccessAccessibilityLabel = "Manage Agent Access…"
     static let futureFolderConfirmationMessage =
       "This profile will automatically gain access to notes moved into this folder."
     static let unassignedLegacySharesLabel = "Unassigned legacy shares"
     static let conflictMessage =
       "This capability profile changed. Reload it before saving."
-    static let inheritedAccessMessage =
-      "Access is inherited from a folder. Edit the profile to change it."
-    static let unavailableAccessMessage =
-      "Capability profile unavailable. Close and reopen this sheet."
-    static let noteAccessContextChangedMessage =
-      "This note’s folder changed. Close and reopen this sheet."
 
     struct ProfileSummary: Equatable, Sendable {
       let summary: String

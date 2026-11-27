@@ -272,12 +272,13 @@
     @State private var isHovered = false
     let shape: S
     let isAllowed: Bool
+    let opacity: Double?
 
     func body(content: Content) -> some View {
       content
         .background {
           if isEnabled, isHovered, isAllowed {
-            shape.fill(Color.primary.opacity(theme.increasedContrast ? 0.18 : 0.08))
+            shape.fill(Color.primary.opacity(theme.increasedContrast ? 0.18 : opacity ?? 0.08))
           }
         }
         .onHover { isHovered = $0 }
@@ -285,8 +286,10 @@
   }
 
   extension View {
-    func fleckHoverFill<S: Shape>(in shape: S, isAllowed: Bool = true) -> some View {
-      modifier(FleckHoverFill(shape: shape, isAllowed: isAllowed))
+    func fleckHoverFill<S: Shape>(
+      in shape: S, isAllowed: Bool = true, opacity: Double? = nil
+    ) -> some View {
+      modifier(FleckHoverFill(shape: shape, isAllowed: isAllowed, opacity: opacity))
     }
 
     func fleckThemedSurface(cornerRadius: CGFloat) -> some View {

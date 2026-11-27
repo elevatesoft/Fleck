@@ -159,7 +159,7 @@ struct FolderNavigatorPresentationTests {
   @Test func focusedUnselectedFolderRowsUseAdaptiveNeutralOutlines() throws {
     let source = try folderNavigatorSource()
     #expect(source.contains(".fleckNeutralControlOutline("))
-    #expect(source.contains("isFocused: isFocused && !isSelected"))
+    #expect(source.contains("isFocused: isFocused && (solidChrome.isActive || !isSelected)"))
     #expect(source.contains("cornerRadius: 6"))
     #expect(!source.contains(".strokeBorder(theme.color(.focusRing), lineWidth: 1)"))
     #expect(source.contains("? theme.color(.hoverFill)"))

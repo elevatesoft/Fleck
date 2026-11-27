@@ -486,6 +486,7 @@
 
     @Published private(set) var phase = DictationPhase.idle
     @Published private(set) var modifierMonitorState = ModifierMonitorState.stopped
+    @Published private(set) var isInputMonitoringNoticeDismissed = false
     @Published private(set) var availability: DictationAvailability
     @Published private(set) var recoveryAction: DictationCapsuleAction?
     @Published private(set) var recoveryActionInFlight = false
@@ -538,7 +539,8 @@
 
     convenience init(
       appState: AppState,
-      applicationSupportURL: URL = AgentBridgeEndpoint.applicationSupportURL()
+      applicationSupportURL: URL = AgentBridgeEndpoint.applicationSupportURL(),
+      modifierMonitor: any ModifierKeyMonitoring = ModifierKeyEventTap()
     ) {
       #if CLEAN_DICTATION_ENHANCED_CANDIDATE
         let enhancedComposition = DictationEnhancedCandidateComposition(
@@ -688,6 +690,7 @@
             DictationDestination(noteID: $0.id, title: $0.displayTitle)
           }
         },
+        monitor: modifierMonitor,
         onRegistrationError: { [weak appState] error in
           appState?.saveError = "Dictation shortcut: \(Self.shortcutMessage(error))"
         }
@@ -889,8 +892,12 @@
         }
       }
       shortcutController.monitorStateHandler = { [weak self] state in
-        self?.modifierMonitorState = state
-        self?.refreshIdleShortcutAccessibility()
+        guard let self else { return }
+        modifierMonitorState = state
+        if state == .running, isInputMonitoringNoticeDismissed {
+          isInputMonitoringNoticeDismissed = false
+        }
+        refreshIdleShortcutAccessibility()
       }
       shortcutController.ownershipHandler = { [weak self] ownership in
         self?.receiveOwnership(ownership)
@@ -1162,6 +1169,18 @@
       guard !enabled else { return nil }
       guard modifierMonitorState == .unauthorized else { return nil }
       return .init(pane: .inputMonitoring)
+    }
+
+    func dismissInputMonitoringNotice() {
+      guard modifierMonitorState == .unauthorized, !isInputMonitoringNoticeDismissed else { return }
+      isInputMonitoringNoticeDismissed = true
+    }
+
+    func observeLocalModifierAttempt(_ modifier: DictationModifierKey) {
+      guard isInputMonitoringNoticeDismissed, modifierMonitorState == .unauthorized,
+        modifier == appState?.preferences.dictationModifierKey, canChangeModifier
+      else { return }
+      isInputMonitoringNoticeDismissed = false
     }
 
     func performModifierShortcutRecovery(

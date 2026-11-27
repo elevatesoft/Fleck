@@ -2395,10 +2395,12 @@ private final class EditorChangeRecorder: NSObject, NSTextViewDelegate {
   #expect(!source.contains("Font Size Presets"))
   #expect(fontTrigger.contains("Text(fontFamilyDisplay)"))
   #expect(!fontTrigger.contains("Text(\"Aa\")"))
-  #expect(fontTrigger.contains(".frame(width: 112)"))
+  #expect(fontTrigger.contains(
+    ".frame(width: solidChrome.isActive ? 110 : 112, height: solidChrome.isActive ? 28 : nil)"
+  ))
   #expect(source.contains("MeasuredTrailingToolbarOverflow"))
-  #expect(source.contains("HStack(spacing: 8)"))
-  #expect(source.contains(".padding(.horizontal, 16)"))
+  #expect(source.contains("HStack(spacing: solidChrome.isActive ? 2 : 8)"))
+  #expect(source.contains(".padding(.horizontal, solidChrome.isActive ? 9 : 16)"))
   #expect(!source.contains("FormattingToolbarLayout"))
 }
 
@@ -2641,7 +2643,15 @@ private func temporaryForegroundColor(in textView: NSTextView, at index: Int) ->
   )
   let overflowItems = try #require(
     source.components(separatedBy: "private func overflowItem(_ item:").last?
-      .components(separatedBy: "private func bulletMenuItems").first
+      .components(separatedBy: "private func listMenuItems").first
+  )
+  let directMenus = try #require(
+    source.components(separatedBy: "private func directFormattingMenu(_ item:").last?
+      .components(separatedBy: "private func formattingBranch").first
+  )
+  let overflowMenus = try #require(
+    source.components(separatedBy: "private func formattingBranch").last?
+      .components(separatedBy: "@ViewBuilder private var toolsInsertMenu").first
   )
   let iconLabel = try #require(
     source.components(separatedBy: "private struct FormattingMenuIconLabel: View").last?
@@ -2651,12 +2661,12 @@ private func temporaryForegroundColor(in textView: NSTextView, at index: Int) ->
   for symbol in ["textformat.alt", "arrow.up.and.down.text.horizontal", "wrench.adjustable"] {
     #expect(NSImage(systemSymbolName: symbol, accessibilityDescription: nil) != nil)
   }
-  #expect(directItems.contains("textMenu(iconOnly: true)"))
-  #expect(directItems.contains("paragraphMenu(iconOnly: true)"))
-  #expect(directItems.contains("toolsInsertMenu(title: \"Tools\", iconOnly: true)"))
-  #expect(overflowItems.contains("textMenu(iconOnly: false)"))
-  #expect(overflowItems.contains("paragraphMenu(iconOnly: false)"))
-  #expect(overflowItems.contains("toolsInsertMenu(title: \"Tools / Insert\", iconOnly: false)"))
+  #expect(directItems.contains("case .textStyles, .text, .paragraph:\n        directFormattingMenu(item)"))
+  #expect(directItems.contains(".control(.tools), attachedTo: toolsInsertMenu"))
+  #expect(directMenus.contains("formattingBranch(item, fromOverflow: false)"))
+  #expect(overflowItems.contains("case .textStyles, .text, .paragraph:\n        return formattingBranch(item, fromOverflow: true)"))
+  #expect(overflowItems.contains("NotesCascadeItem(\"Tools / Insert\""))
+  #expect(overflowItems.contains("items: toolsInsertActions(fromOverflow: true)"))
   #expect(source.contains("FormattingMenuIconLabel(systemImage: \"textformat.alt\")"))
   #expect(source.contains("FormattingMenuIconLabel(systemImage: \"arrow.up.and.down.text.horizontal\")"))
   #expect(source.contains("FormattingMenuIconLabel(systemImage: \"wrench.adjustable\")"))
@@ -2668,21 +2678,20 @@ private func temporaryForegroundColor(in textView: NSTextView, at index: Int) ->
   #expect(iconLabel.contains(".contentShape(Rectangle())"))
   #expect(!iconLabel.contains(".frame(width:"))
   #expect(source.contains(".frame(width: 28, height: 26)"))
-  #expect(source.components(separatedBy: ".menuIndicator(iconOnly ? .hidden : .automatic)").count - 1 == 3)
-  #expect(source.contains("Text(\"Text\")"))
-  #expect(source.contains("Text(\"Paragraph\")"))
-  #expect(source.contains("Text(title)"))
-  #expect(source.contains(".accessibilityLabel(\"Text\")"))
-  #expect(source.contains(".accessibilityLabel(\"Paragraph\")"))
-  #expect(source.contains(".accessibilityLabel(title)"))
-  #expect(source.contains(".help(\"Text formatting\")"))
-  #expect(source.contains(".help(\"Paragraph formatting\")"))
+  #expect(directMenus.contains(".menuIndicator(item == .textStyles ? .automatic : .hidden)"))
+  #expect(directMenus.contains(".accessibilityLabel(branch.title)"))
+  #expect(directMenus.contains(".help(branch.help"))
+  #expect(overflowMenus.contains("NotesCascadeItem(\"Text\", icon: \"bold\", help: \"Text formatting\""))
+  #expect(overflowMenus.contains("NotesCascadeItem(\"Paragraph\", icon: \"list.bullet\", help: \"Paragraph formatting\""))
+  #expect(source.contains("NotesNativeMenuItem(item: overflowItem(item)"))
+  #expect(source.contains("NotesFormattingCascade(items: overflowItems(items), chrome: solidChrome)"))
+  #expect(source.contains(".accessibilityLabel(\"Tools\")"))
   #expect(source.contains(".help(\"Links and find tools\")"))
   #expect(source.contains("FormattingOverflowLabel()"))
   #expect(source.contains("Image(systemName: \"ellipsis\")"))
   #expect(source.contains(".font(.system(size: 17, weight: .bold))"))
   #expect(!formattingBar.contains("ellipsis.circle"))
-  #expect(formattingBar.components(separatedBy: ".popover(item: $presentedPopover").count - 1 == 1)
+  #expect(formattingBar.components(separatedBy: ".popover(item: popoverBinding(for: .toolbar)").count - 1 == 1)
   #expect(!formattingBar.contains(".popover(isPresented:"))
   #expect(formattingBar.contains("case webLink"))
   #expect(formattingBar.contains("case .webLink:"))
@@ -3922,8 +3931,8 @@ func toolbarFontSizeNativePromptAndEditLifecycle(width: Double) async throws {
   #expect(source.contains("Hide Editor toolbar"))
   #expect(source.contains("Show Editor toolbar"))
   #expect(source.contains("showFormattingBar.toggle()"))
-  #expect(source.contains("if appState.preferences.showFormattingBar"))
-  #expect(source.contains("\"chevron.up\""))
+  #expect(source.contains("let showsFormattingBar = appState.preferences.showFormattingBar"))
+  #expect(source.contains("notesHeaderIcon(systemName: \"chevron.up\", paperGlyph: .chevron)"))
   #expect(source.contains(".rotationEffect("))
   #expect(
     source.contains(
@@ -3939,7 +3948,7 @@ func toolbarFontSizeNativePromptAndEditLifecycle(width: Double) async throws {
   ))
 
   let editorCommands = try #require(source.range(of: "@StateObject private var editorCommands = EditorCommands()"))
-  let formattingBar = try #require(source.range(of: "if appState.preferences.showFormattingBar"))
+  let formattingBar = try #require(source.range(of: "if showsFormattingBar {\n            FormattingBar("))
   #expect(editorCommands.lowerBound < formattingBar.lowerBound)
   #expect(!source.contains(".id(appState.preferences.showFormattingBar)"))
 }
@@ -5509,8 +5518,10 @@ private func withHostedTitleEditors(
   #expect(navigator.contains("moveFocus(direction)"))
   #expect(navigator.contains("isSelected: activeFolderID == nil"))
   #expect(navigator.contains("isSelected: activeFolderID == folder.id"))
-  let rowLabel = try #require(navigator.range(of: "private func rowLabel("))
-  let rowLabelBody = navigator[rowLabel.lowerBound...]
+  let rowLabelBody = try #require(
+    navigator.components(separatedBy: "private func rowLabel(").last?
+      .components(separatedBy: "private func noteDropDelegate(").first
+  )
   let rootRow = try #require(
     navigator.components(separatedBy: "private var rootRow").last?
       .components(separatedBy: "@ViewBuilder\n    private func folderRow").first
@@ -5541,7 +5552,7 @@ private func withHostedTitleEditors(
   #expect(folderFocusable.lowerBound < folderFocused.lowerBound)
   #expect(rowLabelBody.contains("isFocused: Bool"))
   #expect(rowLabelBody.contains(".fleckNeutralControlOutline("))
-  #expect(rowLabelBody.contains("isFocused: isFocused && !isSelected"))
+  #expect(rowLabelBody.contains("isFocused: isFocused && (solidChrome.isActive || !isSelected)"))
   #expect(rowLabelBody.contains("cornerRadius: 6"))
   #expect(
     !rowLabelBody.contains(".focusRing")
@@ -6758,7 +6769,10 @@ private func hostedNavigatorKeyView(
     in: view,
     isUnfiled: identifier == "folder-unfiled"
   )
-  #expect(associatedKeyViews != nil)
+  #expect(
+    associatedKeyViews != nil,
+    "AX owner frame: \(ownerFrame); key candidates: \(keyViews.map { String(describing: $0.convert($0.bounds, to: view)) })"
+  )
   guard let matchingKeyViews = associatedKeyViews else { return nil }
   #expect(!matchingKeyViews.isEmpty)
   guard !matchingKeyViews.isEmpty else { return nil }
@@ -6806,6 +6820,8 @@ private func hostedNavigatorVisualKeyViews(
   let visualRow = visualRows[0]
   let contentHost = visualRow.contentHosts[0]
   let contentFrame = contentHost.convert(contentHost.bounds, to: host)
+  let hasDarkSolidVerticalPixelRounding = ownerFrame.height == 28
+    && visualRow.frame.height == 27 && visualRow.frame.maxY == ownerFrame.maxY
   guard let scroll = owner.enclosingScrollView,
     contentHost.enclosingScrollView === scroll,
     ownerFrame.contains(contentFrame),
@@ -6813,7 +6829,7 @@ private func hostedNavigatorVisualKeyViews(
     ownerFrame.contains(visualRow.frame),
     visualRow.frame.minX == ownerFrame.minX,
     visualRow.frame.maxX == ownerFrame.maxX,
-    visualRow.frame.midY == ownerFrame.midY
+    visualRow.frame.midY == ownerFrame.midY || hasDarkSolidVerticalPixelRounding
   else { return nil }
   return [visualRow.view]
 }

@@ -179,10 +179,6 @@ struct AgentCapabilityPresentationTests {
         == ["Off", "Read", "Read & Write"]
     )
     #expect(
-      AgentCapabilityPresentation.manageAgentAccessAccessibilityLabel
-        == "Manage Agent Access…"
-    )
-    #expect(
       AgentCapabilityPresentation.noteAccessAccessibilityLabel(.read)
         == "Agent access: Read"
     )
@@ -311,10 +307,6 @@ struct AgentCapabilityPresentationTests {
         baseline: liveProfile,
         workspace: workspace
       ) != nil
-    )
-    #expect(
-      AgentCapabilityPresentation.inheritedAccessMessage
-        == "Access is inherited from a folder. Edit the profile to change it."
     )
   }
 
@@ -504,10 +496,6 @@ struct AgentCapabilityPresentationTests {
         baselineCapabilities: [:],
         workspace: workspace
       ) == .unavailable
-    )
-    #expect(
-      AgentCapabilityPresentation.unavailableAccessMessage
-        == "Capability profile unavailable. Close and reopen this sheet."
     )
     let displayed = AgentCapabilityPresentation.snapshotActiveProfiles([
       AgentIntegrationProfile(
@@ -791,10 +779,6 @@ struct AgentCapabilityPresentationTests {
         captured: captured,
         workspace: unchangedContext
       )
-    )
-    #expect(
-      AgentCapabilityPresentation.noteAccessContextChangedMessage
-        == "This note’s folder changed. Close and reopen this sheet."
     )
 
     #expect(

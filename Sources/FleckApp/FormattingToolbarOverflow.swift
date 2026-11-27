@@ -64,9 +64,10 @@
     let itemCount: Int
     let spacing: CGFloat
     let minimumTrailingSpacing: CGFloat
+    let pinsOverflowToTrailing: Bool
     let onVisibleCountChange: (Int) -> Void
     @ViewBuilder let item: (Int, Bool) -> Item
-    @ViewBuilder let overflow: (Range<Int>) -> Overflow
+    @ViewBuilder let overflow: (Range<Int>, Bool) -> Overflow
     @ViewBuilder let trailing: (Bool) -> Trailing
     @State private var widths: [Int: CGFloat] = [:]
 
@@ -74,14 +75,16 @@
       itemCount: Int,
       spacing: CGFloat,
       minimumTrailingSpacing: CGFloat,
+      pinsOverflowToTrailing: Bool = false,
       onVisibleCountChange: @escaping (Int) -> Void = { _ in },
       @ViewBuilder item: @escaping (Int, Bool) -> Item,
-      @ViewBuilder overflow: @escaping (Range<Int>) -> Overflow,
+      @ViewBuilder overflow: @escaping (Range<Int>, Bool) -> Overflow,
       @ViewBuilder trailing: @escaping (Bool) -> Trailing
     ) {
       self.itemCount = itemCount
       self.spacing = spacing
       self.minimumTrailingSpacing = minimumTrailingSpacing
+      self.pinsOverflowToTrailing = pinsOverflowToTrailing
       self.onVisibleCountChange = onVisibleCountChange
       self.item = item
       self.overflow = overflow
@@ -94,10 +97,15 @@
         HStack(spacing: 0) {
           HStack(spacing: spacing) {
             ForEach(0..<count, id: \.self) { item($0, false) }
-            if count < itemCount { overflow(count..<itemCount) }
+            if count < itemCount && !pinsOverflowToTrailing { overflow(count..<itemCount, false) }
           }
           .fixedSize(horizontal: true, vertical: false)
           Spacer(minLength: minimumTrailingSpacing)
+          if count < itemCount && pinsOverflowToTrailing {
+            overflow(count..<itemCount, false)
+              .fixedSize(horizontal: true, vertical: false)
+              .padding(.trailing, spacing)
+          }
           trailing(false).fixedSize(horizontal: true, vertical: false)
         }
         .frame(maxHeight: .infinity)
@@ -108,7 +116,7 @@
           ForEach(0..<itemCount, id: \.self) { index in
             measure(index, item(index, true))
           }
-          if itemCount > 0 { measure(itemCount, overflow(0..<itemCount)) }
+          if itemCount > 0 { measure(itemCount, overflow(0..<itemCount, true)) }
           measure(itemCount + 1, trailing(true))
         }
         .fixedSize(horizontal: true, vertical: false)

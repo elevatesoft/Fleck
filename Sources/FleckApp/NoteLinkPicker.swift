@@ -28,7 +28,8 @@
     private let searchOperation: SearchOperation
     private var searchTask: Task<Void, Never>?
     private var searchGeneration: UInt64 = 0
-    private var resultGeneration: UInt64?
+    @Published private var resultGeneration: UInt64?
+    private var resultsQuery: String?
     private weak var hostingWindow: NSWindow?
     private var focusOrigin: NoteLinkPickerFocusOrigin?
     private(set) var sourceNoteID: UUID?
@@ -46,17 +47,27 @@
     }
 
     var resultsAreCurrent: Bool {
-      resultGeneration == searchGeneration
+      resultGeneration == searchGeneration && resultsQuery == query
+    }
+
+    var hasQuery: Bool {
+      !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var isUpdatingResults: Bool {
+      isPresented && hasQuery && !resultsAreCurrent
     }
 
     var resultCountAccessibilityValue: String {
+      let countDescription: String
       switch results.count {
-      case 0: return "No results"
-      case 1: return resultsAreCurrent ? "1 result" : "Updating search results; 1 result"
-      default:
-        let value = String(results.count) + " results"
-        return resultsAreCurrent ? value : "Updating search results; " + value
+      case 0: countDescription = "No results"
+      case 1: countDescription = "1 result"
+      default: countDescription = "\(results.count) results"
       }
+      guard isUpdatingResults else { return countDescription }
+      guard !results.isEmpty else { return "Updating search results" }
+      return "Updating search results; \(countDescription)"
     }
 
     var presentedSourceNoteID: UUID? { sourceNoteID }
@@ -87,6 +98,7 @@
       results = []
       highlightedNoteID = nil
       resultGeneration = nil
+      resultsQuery = nil
       isShowingRecentNotes = false
       hasActivatedCurrentPresentation = false
       isPresented = true
@@ -101,6 +113,7 @@
       results = []
       highlightedNoteID = nil
       resultGeneration = nil
+      resultsQuery = nil
       isShowingRecentNotes = false
       sourceNoteID = nil
       sourceRevision = nil
@@ -136,7 +149,6 @@
       let requestQuery = query
       let sourceID = sourceNoteID
       let candidates = notes.filter { $0.id != sourceID }
-      let trimmedQuery = requestQuery.trimmingCharacters(in: .whitespacesAndNewlines)
 
       guard isPresented else {
         results = []
@@ -145,9 +157,9 @@
         return
       }
 
-      guard !trimmedQuery.isEmpty else {
+      guard hasQuery else {
         isShowingRecentNotes = true
-        apply(Self.recentResults(in: candidates), generation: generation)
+        apply(Self.recentResults(in: candidates), generation: generation, query: requestQuery)
         return
       }
 
@@ -161,12 +173,12 @@
           self.searchGeneration == generation,
           self.query == requestQuery
         else { return }
-        self.apply(results, generation: generation)
+        self.apply(results, generation: generation, query: requestQuery)
       }
     }
 
     func moveHighlight(_ direction: HighlightDirection) {
-      guard !results.isEmpty else { return }
+      guard resultsAreCurrent, !results.isEmpty else { return }
       guard let highlightedNoteID,
         let currentIndex = results.firstIndex(where: { $0.noteID == highlightedNoteID })
       else {
@@ -199,7 +211,7 @@
     ) -> Bool {
       guard isPresented,
         !hasActivatedCurrentPresentation,
-        resultGeneration == searchGeneration,
+        resultsAreCurrent,
         let noteID = highlightedNoteID,
         currentNoteIDs.contains(noteID),
         let replacementRange,
@@ -227,7 +239,7 @@
       currentSourceRevision: UInt64?,
       activate: (UUID, NSRange) -> Void
     ) -> Bool {
-      guard resultGeneration == searchGeneration,
+      guard resultsAreCurrent,
         currentNoteIDs.contains(noteID),
         results.contains(where: { $0.noteID == noteID })
       else { return false }
@@ -301,11 +313,12 @@
       return String(collapsed.prefix(recentPreviewLimit)) + "…"
     }
 
-    private func apply(_ results: [WorkspaceSearchResult], generation: UInt64) {
+    private func apply(_ results: [WorkspaceSearchResult], generation: UInt64, query: String) {
       let results = Array(results.prefix(50))
       let previousHighlight = highlightedNoteID
-      self.results = results
+      resultsQuery = query
       resultGeneration = generation
+      self.results = results
       if let previousHighlight, results.contains(where: { $0.noteID == previousHighlight }) {
         highlightedNoteID = previousHighlight
       } else {
@@ -427,6 +440,8 @@
   }
 
   struct NoteLinkPickerView: View {
+    @Environment(\.fleckThemeSnapshot) private var theme
+    @Environment(\.fleckChromeAppearance) private var appearance
     @ObservedObject var controller: NoteLinkPickerController
     let notes: [Note]
     let foldersByID: [UUID: String]
@@ -435,17 +450,22 @@
     let currentSource: () -> (UUID, UInt64)?
     let onChoose: (UUID, NSRange) -> Void
     @FocusState private var isQueryFocused: Bool
+    @State private var resultsHeight: CGFloat = 220
 
     static func accessibilityLabel(
       for result: WorkspaceSearchResult,
-      folderName: String?
+      folderName: String?,
+      snippet: String? = nil
     ) -> String {
-      [result.displayTitle, folderName, result.snippet]
+      [result.displayTitle, folderName, snippet ?? result.snippet]
         .compactMap { $0 }
+        .filter { !$0.isEmpty }
         .joined(separator: ", ")
     }
 
     var body: some View {
+      let solid = NotesSolidChrome(theme: theme, appearance: appearance)
+      let compact = solid.isActive
       ZStack(alignment: .top) {
         Color.clear
           .contentShape(Rectangle())
@@ -454,9 +474,11 @@
         VStack(alignment: .leading, spacing: 8) {
           HStack(spacing: 8) {
             Image(systemName: "link")
+              .font(compact ? .system(size: 12) : nil)
               .foregroundStyle(.secondary)
               .accessibilityHidden(true)
             TextField("Link to note", text: $controller.query)
+              .font(compact ? .system(size: 14) : nil)
               .textFieldStyle(.plain)
               .focusEffectDisabled()
               .focused($isQueryFocused)
@@ -493,17 +515,20 @@
               controller.dismiss()
             } label: {
               Image(systemName: "xmark")
+                .font(compact ? .system(size: 10, weight: .medium) : nil)
+                .frame(minWidth: compact ? 16 : nil, minHeight: compact ? 24 : nil)
             }
             .buttonStyle(FleckQuietButtonStyle())
             .accessibilityLabel("Dismiss note link picker")
           }
 
           Text(
-            controller.isShowingRecentNotes
-              ? "Recent notes"
+            compact && controller.isUpdatingResults ? "Updating search results"
+              : !controller.hasQuery ? "Recent notes"
+              : compact && controller.results.isEmpty ? "0 results"
               : controller.resultCountAccessibilityValue
           )
-            .font(.caption)
+            .font(compact ? .system(size: 11) : .caption)
             .foregroundStyle(.secondary)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Note link result count")
@@ -511,21 +536,26 @@
 
           if controller.results.isEmpty {
             Text(
-              controller.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? "No other notes"
-                : "No matching notes"
+              controller.hasQuery ? "No matching notes" : "No other notes"
             )
-            .font(.callout)
+            .font(compact ? .system(size: 14) : .callout)
             .foregroundStyle(.secondary)
             .padding(.vertical, 8)
+            .opacity(controller.isUpdatingResults ? 0 : 1)
+            .accessibilityHidden(controller.isUpdatingResults)
           } else {
+            let resultsAreCurrent = controller.resultsAreCurrent
+            let notesByID = Dictionary(uniqueKeysWithValues: notes.map { ($0.id, $0) })
             ScrollViewReader { scrollProxy in
               ScrollView(.vertical) {
                 LazyVStack(spacing: 2) {
                   ForEach(controller.results) { result in
                     let selected = controller.isHighlighted(result.noteID)
-                    let folderName = notes.first(where: { $0.id == result.noteID })?.folderID
-                      .flatMap { foldersByID[$0] }
+                    let note = notesByID[result.noteID]
+                    let folderName = note?.folderID.flatMap { foldersByID[$0] }
+                    let snippet = compact && !controller.isShowingRecentNotes
+                      ? NotesQueryPanelChrome.snippet(for: result, in: note)
+                      : result.snippet
                     Button {
                       let source = currentSource()
                       _ = controller.activateResult(
@@ -538,38 +568,56 @@
                     } label: {
                       VStack(alignment: .leading, spacing: 2) {
                         Text(result.displayTitle)
-                          .font(.body.weight(.semibold))
+                          .font(compact ? .system(size: 14, weight: .medium) : .body.weight(.semibold))
                           .lineLimit(1)
-                        HStack(spacing: 5) {
-                          if let folderName {
-                            Text(folderName)
-                              .font(.caption2)
-                              .foregroundStyle(accent)
-                          }
-                          Text(result.snippet)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        if compact {
+                          Text([folderName, snippet.isEmpty ? nil : snippet].compactMap { $0 }
+                            .joined(separator: " · "))
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.color(.caption))
                             .lineLimit(2)
+                        } else {
+                          HStack(spacing: 5) {
+                            if let folderName {
+                              Text(folderName)
+                                .font(.caption2)
+                                .foregroundStyle(accent)
+                            }
+                            Text(snippet)
+                              .font(.caption)
+                              .foregroundStyle(.secondary)
+                              .lineLimit(2)
+                          }
                         }
                       }
                       .frame(maxWidth: .infinity, alignment: .leading)
                       .padding(.horizontal, 8)
-                      .padding(.vertical, 6)
-                      .background(
-                        RoundedRectangle(cornerRadius: 6)
-                          .fill(selected ? accent.opacity(0.14) : .clear)
-                      )
+                      .padding(.vertical, compact ? 9 : 6)
+                      .frame(minHeight: compact ? 50 : nil, alignment: .leading)
+                      .background {
+                        if selected {
+                          RoundedRectangle(cornerRadius: 6).fill(
+                            compact ? NotesQueryPanelChrome.linkSelection : accent.opacity(0.14)
+                          )
+                        }
+                      }
+                      .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .focusable()
+                    .focusable(resultsAreCurrent)
                     .id(result.noteID)
-                    .accessibilityLabel(Self.accessibilityLabel(for: result, folderName: folderName))
+                    .accessibilityLabel(Self.accessibilityLabel(for: result, folderName: folderName, snippet: snippet))
                     .accessibilityValue(selected ? "Selected" : "Not selected")
                     .accessibilityAddTraits(selected ? .isSelected : [])
+                    .accessibilityHint(resultsAreCurrent ? "" : "Updating search results")
+                    .disabled(!resultsAreCurrent)
                   }
                 }
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                  if compact && height > 0 { resultsHeight = height }
+                }
               }
-              .frame(maxHeight: 220)
+              .frame(maxHeight: compact && controller.results.count <= 3 ? min(220, resultsHeight) : 220)
               .onChange(of: controller.highlightedNoteID) { _, noteID in
                 guard let noteID else { return }
                 scrollProxy.scrollTo(noteID, anchor: .center)
@@ -579,10 +627,7 @@
         }
         .padding(12)
         .frame(maxWidth: 560, alignment: .leading)
-        .fleckThemedSurface(cornerRadius: 12)
-        .overlay {
-          RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary)
-        }
+        .modifier(NotesQueryPanelChrome(solid: solid, cornerRadius: 12))
         .shadow(color: .black.opacity(0.18), radius: 18, y: 8)
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -600,8 +645,8 @@
         isQueryFocused = true
         controller.refresh(in: notes)
       }
-      .onChange(of: controller.query) { _, newQuery in
-        controller.setQuery(newQuery, in: notes)
+      .onChange(of: controller.query) {
+        controller.refresh(in: notes)
       }
       .onChange(of: notes) { _, newNotes in
         controller.refresh(in: newNotes)

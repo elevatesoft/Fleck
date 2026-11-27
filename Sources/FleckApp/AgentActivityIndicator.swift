@@ -1,4 +1,5 @@
 #if os(macOS)
+  import AppKit
   import Combine
   import Foundation
   import SwiftUI
@@ -140,33 +141,63 @@
   struct AgentActivityIndicator: View {
     @Environment(\.fleckThemeSnapshot) private var theme
     @ObservedObject var presentation: AgentActivityIndicatorPresentation
+    var usesBell = false
     let action: () -> Void
 
     var body: some View {
-      Button(action: action) {
-        HStack(spacing: 4) {
-          switch FleckMark.load(template: true) {
-          case .image(let mark):
-            Image(nsImage: mark)
-              .frame(width: 18, height: 18)
-          case .missingPackagedResource:
-            Text("!")
-              .foregroundStyle(theme.color(.error))
+      let button = Button(action: action) {
+        if usesBell {
+          NotesPaperIcon(glyph: .bell)
+            .frame(width: 28, height: 28)
+            .overlay(alignment: .topTrailing) {
+              if presentation.state == .working {
+                Circle()
+                  .fill(Color(nsColor: NSColor(hex: "#E5E9ED")!))
+                  .frame(width: 5, height: 5)
+                  .padding(2)
+                  .accessibilityHidden(true)
+              } else if let statusSymbol = presentation.state.statusSymbol {
+                Image(systemName: statusSymbol)
+                  .font(.system(size: 7, weight: .semibold))
+                  .foregroundStyle(presentation.state.statusColor(in: theme))
+                  .padding(2)
+                  .accessibilityHidden(true)
+              }
+            }
+            .contentShape(Rectangle())
+        } else {
+          HStack(spacing: 4) {
+            switch FleckMark.load(template: true) {
+            case .image(let mark):
+              Image(nsImage: mark)
+                .frame(width: 18, height: 18)
+            case .missingPackagedResource:
+              Text("!")
+                .foregroundStyle(theme.color(.error))
+            }
+            Image(systemName: presentation.state.statusSymbol ?? "circle.fill")
+              .font(.system(size: 7, weight: .semibold))
+              .foregroundStyle(presentation.state.statusColor(in: theme))
+              .opacity(presentation.state.statusSymbol == nil ? 0 : 1)
+              .frame(width: 9, height: 9)
           }
-          Image(systemName: presentation.state.statusSymbol ?? "circle.fill")
-            .font(.system(size: 7, weight: .semibold))
-            .foregroundStyle(presentation.state.statusColor(in: theme))
-            .opacity(presentation.state.statusSymbol == nil ? 0 : 1)
-            .frame(width: 9, height: 9)
+          .frame(width: 32, height: 22, alignment: .leading)
+          .contentShape(Rectangle())
         }
-        .frame(width: 32, height: 22, alignment: .leading)
-        .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
+      .fleckHoverFill(in: RoundedRectangle(cornerRadius: 6), isAllowed: usesBell)
+
+      return Group {
+        if usesBell && presentation.state == .idle {
+          button.accessibilityLabel("Activity Inbox")
+        } else {
+          button.accessibilityLabel(presentation.state.accessibilityLabel)
+        }
+      }
       .accessibilityIdentifier("agent-activity-indicator")
-      .accessibilityLabel(presentation.state.accessibilityLabel)
-      .accessibilityHint("Open Agent Activity")
-      .help(presentation.state.accessibilityLabel)
+      .accessibilityHint(usesBell ? "Open Activity Inbox" : "Open Agent Activity")
+      .help(usesBell && presentation.state == .idle ? "Activity Inbox" : presentation.state.accessibilityLabel)
     }
   }
 #endif

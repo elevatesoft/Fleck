@@ -7,19 +7,30 @@
   /// third-party hot-key dependency. The show/hide command closes the active panel;
   /// system-wide activation is intentionally isolated for a future status-item host.
   struct ShortcutMonitor: NSViewRepresentable {
+    enum WindowCloseHandling {
+      case standard
+      case reserved
+      case closeOwningWindow
+    }
+
     let shortcuts: [Shortcut]
+    var windowCloseHandling: WindowCloseHandling = .standard
     let action: (Shortcut.Action) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(action: action) }
 
     func makeNSView(context: Context) -> NSView {
+      let view = NSView(frame: .zero)
+      context.coordinator.host = view
+      context.coordinator.windowCloseHandling = windowCloseHandling
       context.coordinator.install(shortcuts: shortcuts)
-      return NSView(frame: .zero)
+      return view
     }
 
     func updateNSView(_ view: NSView, context: Context) {
       context.coordinator.action = action
       context.coordinator.shortcuts = shortcuts
+      context.coordinator.windowCloseHandling = windowCloseHandling
     }
 
     static func dismantleNSView(_ view: NSView, coordinator: Coordinator) {
@@ -30,6 +41,8 @@
     final class Coordinator {
       var action: (Shortcut.Action) -> Void
       var shortcuts: [Shortcut] = []
+      var windowCloseHandling: WindowCloseHandling = .standard
+      weak var host: NSView?
       private let isModalActive: () -> Bool
       private var monitor: Any?
 
@@ -44,7 +57,9 @@
       func install(shortcuts: [Shortcut]) {
         self.shortcuts = shortcuts
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-          self?.handle(event) ?? event
+          guard let self, let owner = host?.window, event.window === owner, owner.isKeyWindow
+          else { return event }
+          return self.handle(event)
         }
       }
 
@@ -57,6 +72,16 @@
         guard !isModalActive() else { return event }
         guard !ShortcutCaptureGate.isActive, !ShortcutCaptureGate.wasConsumed(event) else {
           return event
+        }
+        if windowCloseHandling != .standard,
+          event.charactersIgnoringModifiers?.lowercased() == "w",
+          event.modifierFlags.intersection([.command, .shift, .option, .control]) == .command
+        {
+          guard windowCloseHandling == .closeOwningWindow,
+            let owner = host?.window, event.window === owner, owner.isKeyWindow
+          else { return event }
+          owner.performClose(nil)
+          return nil
         }
         guard let command = match(event) else { return event }
         action(command)

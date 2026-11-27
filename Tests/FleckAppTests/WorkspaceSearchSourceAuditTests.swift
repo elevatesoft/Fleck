@@ -55,14 +55,14 @@ func WorkspaceSearchSourceAuditUsesTheProductionPanelAndNativeOverlay() throws {
     ).count - 1 == 2
   )
   #expect(searchView.components(separatedBy: "underlineMatches: isSelected").count - 1 == 2)
-  #expect(
-    searchView.components(
-      separatedBy: "accent: isSelected ? theme.color(.selectionText) : accent"
-    ).count - 1 == 2
-  )
-  #expect(
-    searchView.contains(#".accessibilityLabel("\(result.displayTitle), \(result.snippet)")"#)
-  )
+  #expect(searchView.contains("accent: isSelected ? theme.color(.selectionText) : accent"))
+  #expect(searchView.contains("""
+    accent: compact ? theme.color(.caption)
+                                  : isSelected ? theme.color(.selectionText) : accent
+    """))
+  #expect(searchView.contains(
+    #".accessibilityLabel(snippet.isEmpty ? result.displayTitle : "\(result.displayTitle), \(snippet)")"#
+  ))
   #expect(!searchView.contains(".sheet("))
   #expect(!searchView.contains("NativeRichTextEditor("))
   #expect(!searchView.contains("WorkspaceSearchKeyResponder"))
@@ -94,7 +94,7 @@ func WorkspaceSearchSourceAuditUsesTheProductionPanelAndNativeOverlay() throws {
 }
 
 @Test
-func WorkspaceSearchSourceAuditDoesNotOutlineTheQueryFieldSeparatelyFromItsPanel() throws {
+func WorkspaceSearchSourceAuditKeepsTheFieldOutlineLimitedToDarkSolidHighContrastFocus() throws {
   let root = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent()
     .deletingLastPathComponent()
@@ -116,25 +116,18 @@ func WorkspaceSearchSourceAuditDoesNotOutlineTheQueryFieldSeparatelyFromItsPanel
   #expect(queryField.contains(".focused($isQueryFocused)"))
   #expect(queryField.contains(".accessibilityLabel(\"Search notes\")"))
   #expect(queryField.contains(".accessibilityHint(\"Search note titles and bodies\")"))
-  #expect(!queryField.contains(".fleckNeutralControlOutline("))
-  #expect(searchView.contains(".fleckThemedSurface(cornerRadius: 10)"))
-  let themeSource = try String(
-    contentsOf: root.appendingPathComponent("Sources/FleckApp/FleckThemeSnapshot.swift"),
-    encoding: .utf8
-  )
-  let surfaceStart = try #require(themeSource.range(of: "private struct FleckThemedSurface: ViewModifier"))
-  let surfaceEnd = try #require(
-    themeSource.range(
-      of: "struct FleckQuietButtonStyle: ButtonStyle",
-      range: surfaceStart.upperBound..<themeSource.endIndex
-    )
-  )
-  let surface = themeSource[surfaceStart.lowerBound..<surfaceEnd.lowerBound]
+  #expect(queryField.contains(".fleckNeutralControlOutline("))
+  #expect(queryField.contains("isFocused: compact && solid.increasedContrast && isQueryFocused"))
+  #expect(searchView.contains("let compact = solid.isActive"))
+  #expect(searchView.contains(".modifier(NotesQueryPanelChrome(solid: solid, cornerRadius: 10))"))
+  let surface = try #require(searchView.components(separatedBy: "struct NotesQueryPanelChrome: ViewModifier")
+    .last?.components(separatedBy: "static func snippet(").first)
   #expect(surface.contains("@Environment(\\.fleckThemeSnapshot) private var theme"))
-  #expect(surface.contains("content.background("))
-  #expect(surface.contains("theme.color(.card)"))
-  #expect(surface.contains("in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)"))
-  #expect(searchView.contains(".strokeBorder(.quaternary)"))
+  #expect(surface.contains(".background(solid.isActive ? Self.surface : theme.color(.card), in: shape)"))
+  #expect(surface.contains("RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)"))
+  #expect(surface.contains("shape.strokeBorder(solid.increasedContrast ? solid.outline : Self.outline)"))
+  #expect(surface.contains("shape.strokeBorder(.quaternary)"))
+  #expect(surface.contains(".allowsHitTesting(false)"))
 }
 
 @Test
