@@ -3,6 +3,14 @@
 All notable Fleck development changes are recorded here. This is development history, not a
 public release log. Packaging unchanged source does not add a changelog entry.
 
+## [1.9.31-beta.1] - 2026-11-27
+
+### Fixed
+- Keep menu Notes window-frame corrections out of AppKit layout and SwiftUI
+  configuration callbacks.
+- Keep menu Notes at its usable minimum width during a drag so it doesn't
+  jump wider on release, while preserving cross-anchor resizing.
+
 ## [1.8.68-beta.1] - 2026-11-21
 
 ### Fixed
