@@ -278,11 +278,9 @@
           {
             continue
           }
-          if restoresActivationFocus, restoredFocus,
-            let responder = self.hostingWindow?.firstResponder,
-            !(responder is NSWindow)
-          {
-            continue
+          if restoredFocus {
+            guard let window = self.hostingWindow else { continue }
+            if let responder = window.firstResponder, !(responder is NSWindow) { continue }
           }
           if self.focusRestoreAction?() == true {
             guard restoresActivationFocus else {
