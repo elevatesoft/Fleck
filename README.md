@@ -88,11 +88,9 @@ for the current release gates.
 
 ## What is here
 
-![Fleck workspace mockup in Capy Dark Solid with folders, the formatting and dictation toolbar, and file shortcuts above a Release checklist note](docs/images/fleck-workspace.png)
+![Fleck Notes design preview in Capy Dark showing folders, note tabs, the formatting toolbar, and a release checklist.](docs/images/fleck-workspace.png)
 
-Capy Dark Solid design mockup with a sample note and file shortcuts. The
-Release checklist shows where you write, format, and dictate; file shortcuts
-open local references without importing them into the note.
+Fleck Notes design preview, rendered from Paper.
 
 The ordinary build from public `main` contains:
 
